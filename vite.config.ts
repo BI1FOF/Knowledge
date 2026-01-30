@@ -16,6 +16,9 @@ export default defineConfig(({ command }) => {
     build: {
       chunkSizeWarningLimit: 1500, // 将警告阈值提高到 1500KB（默认是 500KB）
     },
+    optimizeDeps: {
+      include: ['pdfjs-dist']
+    },
     plugins: [
       vue(),
       electron({

@@ -245,10 +245,10 @@
   }
   .fullscreen-active {
     position: fixed;
-    top: 45px;
-    left: 40px;
-    width:calc(100% - 80px);
-    height:calc(100% - 95px);
+    top: 60px;
+    left: 60px;
+    width:calc(100% - 120px);
+    height:calc(100% - 120px);
     border: 1px solid var(--borderColor);
     border-radius: 5px;
     background-color: var(--backgroundColor);

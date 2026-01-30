@@ -1,46 +1,31 @@
 <script setup lang="ts">
-  import {ref, nextTick,computed,onMounted} from 'vue'
+  import {ref, onMounted, computed} from 'vue'
   import {usestore} from './store'
   const store=usestore()
-
-  import SlideAI from './components/SlideAI.vue'
-  import file from './components/file.vue'
-  import calendar from './components/calendar.vue'
-  import explorer from './components/explorer.vue'
-  import browser from './components/browser.vue'
-  import other from './components/other.vue'
-  import knowledge from './components/knowledge.vue'
-  import flow from './components/flow.vue'
+  import home from './components/home.vue'
+  import explorer from './components/knowFile/explorer.vue'
+  import knowledge from './components/knowRAG/knowRAG.vue'
+  import flow from './components/workFlow/workFlow.vue'
+  import ToDo from './components/todos/ToDo.vue'
   import Set from './components/Set.vue'
-
-  const isResizing = ref(false);
-  const startX = ref(0);
-  const startWidth = ref(0);
-  const panelWidth = ref(300); // 初始宽度
-  const panelType = ref("文件"); // 面板类型
   const set = ref(false); // 是否显示设置面板
-  const startResize = (e:any) => {
-    isResizing.value = true
-    startX.value = e.clientX
-    startWidth.value = panelWidth.value
-    document.addEventListener('mousemove', resize)
-    document.addEventListener('mouseup', stopResize)
-    store.resize()
-  };
-
-  const resize = (e:any) => {
-    if (isResizing.value) {
-      const deltaX = e.clientX - startX.value;
-      panelWidth.value = Math.max(startWidth.value + deltaX, 145); // 设置最小宽度为100px
-    }
-  };
-
-  const stopResize = () => {
-    isResizing.value = false;
-    document.removeEventListener('mousemove', resize);
-    document.removeEventListener('mouseup', stopResize);
-  }
+  const isMaximized = ref(false); // 窗口是否最大化状态
   store.setTheme()
+
+  // 计算标题文本
+  const panelTitle = computed(() => {
+    if (store.locales === 'en') {
+      switch(store.mainPanel) {
+        case '主页': return 'home';
+        case '知识管理': return 'Knowledge Management';
+        case '知识库处理': return 'Knowledge Base Processing';
+        case '工作流': return 'Workflow';
+        case '灵感管理': return 'Inspiration Management';
+        default: return store.mainPanel;
+      }
+    }
+    return store.mainPanel; // 默认使用中文
+  })
 
   onMounted(async () => {
     store.loadConfig()
@@ -48,42 +33,91 @@
       store.tree =  await window.ipcRenderer.invoke('getDirectoryTree',store.root)
     }
   })
+  function minimizeWindow() {
+    window.ipcRenderer.invoke('minimize-window');
+  }
+
+  function maximizeWindow() {
+    isMaximized.value=!isMaximized.value
+    window.ipcRenderer.invoke('maximize-window');
+  }
+
+  function toggleFullscreen() {
+    window.ipcRenderer.invoke('toggle-fullscreen');
+  }
+  function closeWindow() {
+    store.saveConfig()
+    window.ipcRenderer.invoke('close-window')
+  }
+  function closeSetPanel() {
+    set.value = false
+  }
 </script>
 
 <template>
-  
   <div class="container">
-    <div class="mainPanel" :class="{ 'panel-hide': store.sidePanel }" v-if="!store.sidePanel" :style="{ width: (panelType=='')?'40px':((store.mainPanel=='')?'100%':(panelWidth + 'px')) ,borderRight: (store.mainPanel==''||panelType=='') ? '' : '1px solid var(--borderColor)'}">
-      <div style="width: 100%;display: flex">
-        <div class="panel-header">
-          <div :class="{active:store.mainPanel=='文件'}" @click="panelType='文件';store.mainPanel='文件'" title="文件管理"><i class="fa fa-folder-o"></i></div>
-          <div :class="{active:store.mainPanel=='知识库处理'}" @click="store.mainPanel='知识库处理';panelType=''" title="知识库处理"><i class="fa fa-stack-overflow"></i></div>
-          <div :class="{active:store.mainPanel=='工作流'}" @click="store.mainPanel='工作流';panelType=''" title="工作流"><i class="fa fa-stumbleupon"></i></div>
-          <div :class="{active:store.mainPanel=='独立AI'}" @click="store.mainPanel='独立AI';panelType=''" title="独立AI"><i class="iconfont">&#xe65d;</i></div>
-          <div :class="{active:store.mainPanel=='日历'}" @click="panelType='';store.mainPanel='日历'" title="日历"><i class="fa fa-calendar"></i></div>
-          <!--<div :class="{active:store.mainPanel=='工具'}" @click="panelType='';store.mainPanel='工具'" title="工具"><i class="fa fa-th"></i></div>-->
-          <div style="flex:1;-webkit-app-region: drag;"></div>
-          <div :class="{active:set}" @click="set=!set"><i class="fa fa-cogs"></i></div>
-        </div>
-        <div style="height:calc(100vh - 0px);width: calc(100% - 45px)" v-if="panelType!=''">
-          <file v-if="panelType=='文件'"/>
-          <SlideAI v-if="panelType=='AI'"/>
-        </div>
+    <!-- 左侧面板 -->
+    <div class="mainPanel">
+      <div class="panel-header">
+        <div :class="{active:store.mainPanel=='主页'}" @click="store.mainPanel='主页';" :title="store.locales === 'en' ? 'Home' : '主页'"><i class="fa fa-home"></i></div>
+        <div :class="{active:store.mainPanel=='知识管理'}" @click="store.mainPanel='知识管理';"  :title="store.locales === 'en' ? 'Knowledge Management' : '知识管理'"><i class="fa fa-book"></i></div>
+        <div :class="{active:store.mainPanel=='知识库处理'}" @click="store.mainPanel='知识库处理';" :title="store.locales === 'en' ? 'Knowledge Base Processing' : '知识库处理'"><i class="fa fa-stack-overflow"></i></div>
+        <div :class="{active:store.mainPanel=='工作流'}" @click="store.mainPanel='工作流'"  :title="store.locales === 'en' ? 'Workflow' : '工作流'"><i class="fa fa-stumbleupon"></i></div>
+        <div :class="{active:store.mainPanel=='灵感管理'}" @click="store.mainPanel='灵感管理';"  :title="store.locales === 'en' ? 'Inspiration Management' : '灵感管理'"><i class="fa fa-lightbulb-o"></i></div>
+        <div style="flex:1;-webkit-app-region: drag;font-size: 12px;">{{ panelTitle }}</div>
+        <div :class="{active:set}" @click="set=!set"><i class="fa fa-cogs"></i></div>
+        <div @click="minimizeWindow" title="最小化">
+            <i class="fa fa-minus"></i>
+          </div>
+          <div @click="maximizeWindow" title="最大化/还原">
+            <i class="fa" :class="isMaximized ? 'fa-compress' : 'fa-window-maximize'"></i>
+          </div>
+          <div @click="toggleFullscreen" title="全屏/退出全屏">
+            <i class="fa fa-arrows-alt"></i>
+          </div>
+        <div @click="closeWindow" style="font-size:16px;margin-top: 6px;margin-right: 6px;"><i class="fa fa-times"></i></div>
       </div>
-      <div class="panel-draggable" @mousedown="startResize" v-if="store.mainPanel!=''"></div>
     </div>
-    <SlideAI v-if="store.mainPanel=='独立AI'" :style="{ width: panelType!=''?('calc(100% - ' + panelWidth + 'px)'):'100%' }"/>
-    <explorer v-if="store.mainPanel=='文件'" :style="{ width: 'calc(100% - ' + panelWidth + 'px)' }"/>
-    <calendar v-if="store.mainPanel=='日历'" :style="{ width: panelType!=''?('calc(100% - ' + panelWidth + 'px)'):'100%' }"/>
-    <browser v-if="store.mainPanel=='网络'" :style="{ width: 'calc(100% - ' + panelWidth + 'px)' }"/>
-    <knowledge v-if="store.mainPanel=='知识库处理'" :style="{ width: 'calc(100% - ' + panelWidth + 'px)' }"/>
-    <flow v-if="store.mainPanel=='工作流'" :style="{ width: 'calc(100% - ' + panelWidth + 'px)' }"/>
-    <other v-if="store.mainPanel=='工具'" :style="{ width: 'calc(100% - ' + panelWidth + 'px)' }"/>
-    <div v-if="set" style="position: absolute;width: 70%;left: 15%;top:50px;height:calc(100% - 100px);border: 1px solid var(--fontActiveColor);background-color: var(--menuColor);border-radius: 5px;">
-      <Set/>
+    
+    <!-- 右侧内容区域 -->
+    <div class="main">
+      <home v-if="store.mainPanel=='主页'"/>
+      <explorer v-if="store.mainPanel=='知识管理'"/>
+      <knowledge v-if="store.mainPanel=='知识库处理'"/>
+      <flow v-if="store.mainPanel=='工作流'"/>
+      <ToDo v-if="store.mainPanel=='灵感管理'"/>
+    </div>
+    
+    <!-- 设置面板 -->
+    <div v-if="set" class="set-overlay" @click="closeSetPanel">
+      <div class="settings-panel" @click.stop>
+        <Set/>
+      </div>
     </div>
   </div>
 </template>
 
 <style>
+  .set-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.8);
+    z-index: 1000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .settings-panel {
+    position: absolute;
+    width: 80%;
+    left: 10%;
+    top: 60px;
+    height: calc(100% - 120px);
+    z-index: 100;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
 </style>

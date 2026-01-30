@@ -1,3 +1,4 @@
+/* src/style.css */
 :root {
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
@@ -77,6 +78,85 @@ input{
 input:focus{
   outline:none;
 }
+
+/* Checkbox 基础样式 */
+input[type="checkbox"] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 4px 2px;
+  border: 1px solid var(--borderColor);
+  border-radius: 4px;
+  background-color: var(--menuColor);
+  cursor: pointer;
+  position: relative;
+  vertical-align: middle;
+  outline: none;
+  transition: all 0.25s ease;
+}
+
+/* Checkbox 悬停状态 */
+input[type="checkbox"]:hover {
+  background-color: var(--menuActiveColor);
+  border-color: var(--fontActiveColor);
+}
+
+/* Checkbox 选中状态 */
+input[type="checkbox"]:checked {
+  background-color: var(--fontActiveColor);
+  border-color: var(--fontActiveColor);
+}
+
+/* Checkbox 选中后的勾选标记 */
+input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 4px;
+  height: 8px;
+  border: solid var(--backgroundColor);
+  border-width: 0 2px 2px 0;
+  transform: translate(-50%, -60%) rotate(45deg);
+}
+
+/* Checkbox 禁用状态 */
+input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: var(--borderColor);
+}
+
+/* Checkbox 焦点状态 */
+input[type="checkbox"]:focus {
+  box-shadow: 0 0 0 2px rgba(var(--fontActiveColor-rgb), 0.2);
+}
+
+/* 与label配合使用的样式 */
+label.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+label.checkbox-label input[type="checkbox"] {
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+/* 调整checkbox在表格中的显示 */
+table input[type="checkbox"] {
+  margin: 0;
+}
+
+/* 表单组中的checkbox */
+.form-group input[type="checkbox"] {
+  margin: 5px;
+}
+
 label{
   line-height: 30px;
   padding: 5px;
@@ -147,56 +227,115 @@ p{
 
 .container {
   display: flex;
+  flex-direction: column;
   height: calc(100vh - 2px);
   overflow: hidden;
   width:100vw - 2px;
-  border: 1px solid var(--borderColor);
   background-color: var(--backgroundColor);
   border-radius: 0px;
 }
-
-.mainPanel { /*左侧面板*/
-  width: 300px;
+.container {
+  display: flex;
   height: 100vh;
-  max-height: calc(100vh);
   overflow: hidden;
+  background-color: var(--backgroundColor);
+}
+
+/* 左侧主面板 */
+.mainPanel {
+  width: fit-content;
+  min-width: 100%;
+  height: 39px;
   background-color: var(--menuColor);
+  border-right: 1px solid var(--borderColor);
   transition: width 0.1s ease;
   display: flex;
+  position: relative;
+  z-index: 10;
+  border: var(--borderColor) 1px solid;
 }
 
-.mainPanel .panel-draggable{
-  margin-left: -1px;
-  width: 1px;
+/* 隐藏状态 */
+.mainPanel.panel-hide {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  border-right: none;
+}
+
+/* 拖拽条 */
+.mainPanel .panel-draggable {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 5px;
   height: 100%;
   cursor: ew-resize;
-  z-index: 999;
+  z-index: 11;
 }
-.mainPanel .panel-draggable:hover{
+
+.mainPanel .panel-draggable:hover {
   background-color: var(--menuActiveColor);
   opacity: 0.5;
-  margin-left: -5px;
-  width: 5px;
 }
-.mainPanel .panel-header{
-  height:100%;
-  width:38px;
+
+/* 面板头部（图标栏） */
+.panel-header {
+  width: 100%;
+  height: 100%;
   display: flex;
-  cursor: pointer;
+  flex-direction: row;
+  align-items: center;
+  padding: 0;
   user-select: none;
-  flex-direction: column;
-  border-right: 1px solid var(--borderColor);
+  margin-left: 5px;
+}
+
+.panel-header div {
+  width: 30px;
+  height: 30px;
+  line-height: 30px;
+  margin: 0px 5px 0px 0px;
   text-align: center;
-  font-size: 20px;
+  border-radius: 5px;
+  font-size: 16px;
+  color: var(--fontColor);
+  cursor: pointer;
+  transition: all 0.25s ease;
 }
-.panel-header div{
-  
-  height: 40px;
-  line-height: 40px;
+
+.panel-header div:hover {
+  color: var(--fontActiveColor);
+  background-color: var(--menuActiveColor);
 }
-.panel-header div:hover{
-  color:var(--fontActiveColor);
-  background-color: var(--menuColor);
+
+.panel-header div.active {
+  color: var(--fontActiveColor);
+  background-color: var(--menuActiveColor);
+}
+
+/* 拖拽区域 */
+.panel-header div[style*="drag"] {
+  cursor: move;
+  opacity: 0.3;
+}
+
+.panel-header div[style*="drag"]:hover {
+  background-color: transparent;
+}
+
+/* 设置按钮 */
+.panel-header div:last-child {
+  margin-top: auto;
+  margin-bottom: 5px;
+}
+
+/* 右侧主内容区域 */
+.main {
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
 }
 
 .button{ /*按钮样式*/
@@ -222,7 +361,6 @@ p{
 .active{
   background-color: var(--menuActiveColor);
   color: var(--fontActiveColor);
-  border-right: var(--fontActiveColor) 2px solid;
 }
 .mini-button{ /*按钮样式*/
   margin:5px;
@@ -236,11 +374,6 @@ p{
   background-color: var(--backgroundColor);
   margin-right: 0px;
   text-align: center;
-}
-.panel-hide { /*左侧面板隐藏*/
-  height: 0;
-  width: 0;
-  opacity:0;
 }
 
 .main { /*主面板*/
@@ -264,29 +397,9 @@ p{
 }
 .scoll::-webkit-scrollbar-thumb
 {
-  background-color:var(--fontActiveColor);
+  background-color:var(--menuActiveColor);
 }
 
-.el-tree {
-  --el-tree-node-content-height: 26px;
-  --el-tree-node-hover-bg-color: var(--el-fill-color-light);
-  --el-tree-text-color: var(--el-text-color-regular);
-  --el-tree-expand-icon-color: var(--el-text-color-placeholder);
-  background: var(--menuColor);
-  color: var(--fontColor);
-  cursor: default;
-  font-size: var(--el-font-size-base);
-  position: relative;
-}
-
-.el-tree-node:focus>.el-tree-node__content {
-  background-color: var(--menuColor);
-  color: var(--fontActiveColor);
-}
-
-.el-tree-node:hover>.el-tree-node__content {
-  background-color: var(--menuActiveColor);
-}
  /**甘特图样式*/
  .gantt_container, .gantt_tooltip,.gantt_grid_scale,.gantt_scale_cell,.gantt_task_cell,.gantt_cell,.gantt_cell_tree{
   background-color: var(--backgroundColor) !important;

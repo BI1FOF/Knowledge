@@ -9,8 +9,8 @@ import mammoth from "mammoth"
 import TurndownService from 'turndown'
 import xlsx from 'xlsx'
 import * as PDFJS from 'pdfjs-dist'
-import http from 'http'
-import WebSocket from 'ws';
+import { pythonService } from './python-service'
+import { trustedPythonService } from './trusted-python-service'
 
 globalThis.__filename = fileURLToPath(import.meta.url)
 globalThis.__dirname = dirname(__filename)
@@ -57,9 +57,9 @@ const indexHtml = join(process.env.DIST, 'index.html')
 async function createWindow() {
   win = new BrowserWindow({
     title: 'AI-KM',
-    width: 440, // 设置窗口的初始宽度
+    width: 900, // 设置窗口的初始宽度
     height: 600, // 设置窗口的初始高度
-    minWidth: 440,
+    minWidth: 600,
     minHeight: 350,
     //transparent: true, // 设置窗口透明
     icon: join(process.env.VITE_PUBLIC, 'favicon.ico'),
@@ -102,13 +102,6 @@ async function createWindow() {
   } else {
     win.loadFile(indexHtml)
   }
-  win.on('resize', () => {
-    fs.writeFileSync(boundsFilePath, JSON.stringify(win.getBounds()));
-  });
-
-  win.on('move', () => {
-    fs.writeFileSync(boundsFilePath, JSON.stringify(win.getBounds()));
-  });
   // Test actively push message to the Electron-Renderer
   win.webContents.on('did-finish-load', () => {
     win?.webContents.send('main-process-message', new Date().toLocaleString())
@@ -127,7 +120,11 @@ async function createWindow() {
   
 }
 
-app.whenReady().then(createWindow)
+app.whenReady().then(async () => {
+  // 初始化 Python 服务
+  await pythonService.initialize()
+  createWindow()
+})
 
 app.on('window-all-closed', () => {
   win = null
@@ -166,32 +163,6 @@ ipcMain.handle('open-win', (_, arg) => {
   } else {
     childWindow.loadFile(indexHtml, { hash: arg })
   }
-})
-
-//使用webscoket传输数据
-let wss;
-function createWebscoket(){
-  // 创建WebSocket服务器
-  wss = new WebSocket.Server({ port: 8080 });
-
-  wss.on('connection', function connection(ws) {
-    console.log('WebSocket连接已建立');
-
-    // 当收到消息时的处理逻辑
-    ws.on('message', function incoming(message) {
-      console.log('收到消息: %s', message);
-    });
-
-    // 定时向客户端推送数据
-    setInterval(() => {
-      ws.send(JSON.stringify({ data: '需要推送的数据' }));
-    }, 1000); // 每秒推送一次数据
-  });
-}
-// 在渲染进程中调用该函数来获取文件树
-ipcMain.handle('createWebscoket', (event) => {
-  createWebscoket()
-  return "开启成功";
 })
 
 //读取文件树
@@ -344,6 +315,27 @@ ipcMain.handle('getConfig', (event, path) => {
     return getConfig(path)
   }
 })
+// 保存/更新 markdown 文件的 YAML 元数据（frontmatter）
+ipcMain.handle('saveFileMetadata', async (event, filePath, metadata) => {
+  try {
+    if (!filePath || path.extname(filePath) !== '.md') return false
+    if (!fs.existsSync(filePath)) return false
+
+    const fileContent = fs.readFileSync(filePath, 'utf8')
+    const matches = fileContent.match(/^---\r?\n([\s\S]+?)\r?\n---\r?\n?/) // existing frontmatter
+    const rest = matches ? fileContent.slice(matches[0].length) : (matches===null?fileContent:'')
+
+    // 将 metadata 对象序列化为 YAML
+    const yamlStr = yaml.dump(metadata || {})
+    const newContent = `---\n${yamlStr}---\n${rest}`
+
+    fs.writeFileSync(filePath, newContent, 'utf8')
+    return true
+  } catch (error) {
+    console.error('保存文件元数据失败:', error)
+    return false
+  }
+})
 // 在渲染进程中调用该函数来获取文件列表
 ipcMain.handle('getFiles', (event, folderPath,n) => {
   if (folderPath) {
@@ -359,7 +351,7 @@ ipcMain.handle('getFilesRelation', (event, folderPath,n) => {
   }
 })
 // 通过对话框打开文件，并返回路径
-ipcMain.handle('openFileDialog', async (event) => {
+ipcMain.handle('selectFile', async (event) => {
   const result = await dialog.showOpenDialog(win, {
     properties: ['openFile']
   });
@@ -383,6 +375,7 @@ ipcMain.handle('openFolderDialog', async (event) => {
     return null;
   }
 });
+//读取PDF
 async function readPdf(filePath: string){
   const loadingTask = PDFJS.getDocument(filePath);
   const pdfDocument = await loadingTask.promise;
@@ -414,6 +407,7 @@ function convertToMarkdown(data) {
 
   return markdown;
 }
+//创建文件
 async function createFile(directoryPath: string, fileName: string): Promise<string | null> {
   try {
     // 检查目录是否存在
@@ -490,10 +484,28 @@ ipcMain.handle('isDirectory', (event, filePath) => {
     return false;
   }
 });
+// 在系统文件管理器中打开文件所在的文件夹
+ipcMain.handle('openInFolder', async (event, filePath) => {
+  try {
+    // 检查文件或文件夹是否存在
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`路径不存在: ${filePath}`);
+    }
+
+    // 使用 shell 模块打开文件所在位置
+    // showItemInFolder 会在文件管理器中打开并选中文件
+    shell.showItemInFolder(filePath);
+    return true;
+  } catch (error) {
+    console.error('打开文件位置失败:', error);
+    throw error;
+  }
+});
 //读取文件
 ipcMain.handle('readFile', async (event, filePath) => {
   //判断类型并读取文件
   const fileExtension = path.extname(filePath);
+  
   if(fileExtension==".md"||fileExtension==""||fileExtension==".kb"){
     try {
       const fileContent = fs.readFileSync(filePath, 'utf-8');
@@ -501,7 +513,7 @@ ipcMain.handle('readFile', async (event, filePath) => {
     } catch (error) {
       return `Error reading file: ${error.message}`;
     }
-  }else if(fileExtension==".docx"){
+  } else if(fileExtension==".docx"){
     try {
       const { value: html } = await mammoth.convertToHtml({ path: filePath })
       const turndownService = new TurndownService()
@@ -509,35 +521,124 @@ ipcMain.handle('readFile', async (event, filePath) => {
       return result
     } catch (err) {
       console.error(err);
-      throw err; // 可以选择抛出错误，让调用方处理
+      throw err;
     }
-  }else if(fileExtension==".pdf"){
+  } else if(fileExtension==".pdf"){
     const result = await readPdf(filePath)
     return result
-  }else if(fileExtension==".xlsx"){
+  } else if(fileExtension==".xlsx"){
     const workbook = xlsx.readFile(filePath);
-    // 初始化Markdown内容
     let allMarkdownContent = '';
 
-    // 遍历所有工作表
     workbook.SheetNames.forEach(sheetName => {
       const worksheet = workbook.Sheets[sheetName]
-
-      // 将工作表转换为JSON格式
       const jsonData = xlsx.utils.sheet_to_json(worksheet, { header: 1 })
-
-      // 将JSON数据转换为Markdown
       const markdownContent = convertToMarkdown(jsonData)
-
-      // 添加工作表名称作为标题
       allMarkdownContent += `## ${sheetName}\n\n`
-      
-      // 添加工作表的Markdown内容
       allMarkdownContent += markdownContent + '\n\n'
     })
     return allMarkdownContent
+  } else if(fileExtension==".html"||fileExtension==".htm"){
+    // 读取HTML文件
+    try {
+      const htmlContent = fs.readFileSync(filePath, 'utf-8');
+      
+      // 去除HTML标签，保留纯文本内容
+      // 简单处理：移除HTML标签，保留内容
+      const textContent = htmlContent
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')  // 移除script标签
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')    // 移除style标签
+        .replace(/<[^>]*>/g, '')                          // 移除所有HTML标签
+        .replace(/\s+/g, ' ')                            // 合并多个空格
+        .trim();
+      
+      return textContent;
+      
+      // 如果需要保留格式，可以使用Turndown转换为Markdown
+      // const turndownService = new TurndownService()
+      // return turndownService.turndown(htmlContent)
+    } catch (error) {
+      return `Error reading HTML file: ${error.message}`;
+    }
+  } else if(fileExtension==".js"||fileExtension==".javascript"){
+    // 读取JavaScript文件
+    try {
+      const jsContent = fs.readFileSync(filePath, 'utf-8');
+      
+      // 对于JavaScript文件，可以添加代码块标记
+      return `\`\`\`javascript\n${jsContent}\n\`\`\``;
+    } catch (error) {
+      return `Error reading JavaScript file: ${error.message}`;
+    }
+  } else if(fileExtension==".py"||fileExtension==".python"){
+    // 读取Python文件
+    try {
+      const pyContent = fs.readFileSync(filePath, 'utf-8');
+      
+      // 对于Python文件，添加代码块标记
+      return `\`\`\`python\n${pyContent}\n\`\`\``;
+    } catch (error) {
+      return `Error reading Python file: ${error.message}`;
+    }
+  } else if(fileExtension==".txt"){
+    // 处理纯文本文件
+    try {
+      return fs.readFileSync(filePath, 'utf-8');
+    } catch (error) {
+      return `Error reading text file: ${error.message}`;
+    }
+  } else if(fileExtension==".json"){
+    // 处理JSON文件
+    try {
+      const jsonContent = fs.readFileSync(filePath, 'utf-8');
+      
+      // 尝试格式化JSON
+      try {
+        const parsed = JSON.parse(jsonContent);
+        return JSON.stringify(parsed, null, 2);
+      } catch {
+        // 如果JSON无效，返回原始内容
+        return jsonContent;
+      }
+    } catch (error) {
+      return `Error reading JSON file: ${error.message}`;
+    }
+  } else if(fileExtension==".csv"){
+    // 处理CSV文件
+    try {
+      const csvContent = fs.readFileSync(filePath, 'utf-8');
+      
+      // 简单转换为Markdown表格
+      const lines = csvContent.split('\n').filter(line => line.trim() !== '');
+      if (lines.length === 0) return '';
+      
+      let markdownTable = '';
+      
+      // 添加表头
+      const headers = lines[0].split(',');
+      markdownTable += '| ' + headers.join(' | ') + ' |\n';
+      markdownTable += '|' + headers.map(() => '---').join('|') + '|\n';
+      
+      // 添加数据行
+      for (let i = 1; i < lines.length; i++) {
+        const cells = lines[i].split(',');
+        markdownTable += '| ' + cells.join(' | ') + ' |\n';
+      }
+      
+      return markdownTable;
+    } catch (error) {
+      return `Error reading CSV file: ${error.message}`;
+    }
+  } else {
+    // 其他格式的文件尝试作为纯文本读取
+    try {
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+      return `${fileContent}`;
+    } catch (error) {
+      return `不支持的文件格式：${fileExtension}\n错误信息：${error.message}`;
+    }
   }
-})
+});
 //打开并读取文件
 ipcMain.handle('openAndReadFile', async (event, type) => {
   const result = await dialog.showOpenDialog(win, {
@@ -619,53 +720,24 @@ ipcMain.handle('openFile',async(event)=>{
   return { content: null, filePath: null }
 })
 
-//服务器操作
-let server;
-
-// 创建 HTTP 服务器
-function startServer() {
-  if(server==undefined){
-    server = http.createServer((req, res) => {
-      res.writeHead(200, { 'Content-Type': 'text/plain' });
-      res.end('Hello, client! This is the Electron HTTP server.');
-    });
-  
-    const port = 3000;
-    server.listen(port, () => {
-      console.log(`Server running on http://localhost:${port}/`);
-      win.webContents.send('server-status', true);
-    });
-  }  
-}
-// 关闭 HTTP 服务器
-function stopServer() {
-  if (server) {
-    server.close(() => {
-      console.log('Server stopped.');
-      win.webContents.send('server-status', false);
-    })
-    server=undefined
-  }
-}
-
-// 监听来自渲染进程的事件
-ipcMain.on('toggle-server', (event, arg) => {
-  if (arg === 'start') {
-    startServer();
-  } else if (arg === 'stop') {
-    stopServer();
-  }
+ipcMain.handle('showDialog', async (event, options) => {
+  const result = await dialog.showMessageBox(options);
+  return result;
 });
 
-//全屏按钮
-ipcMain.on('toggle-fullscreen', () => {
-  console.log(win.isFullScreen())
-  if (win.isFullScreen()) {
-    win.setFullScreen(false);
-  } else {
-    win.setFullScreen(true);
-  }
-});
+ipcMain.handle('readFileBinary', async (event, filePath) => {
+    try {
+        if (!fs.existsSync(filePath)) {
+            throw new Error(`文件不存在: ${filePath}`)
+        }
+        
+        const fileBuffer = fs.readFileSync(filePath)
+        return new Uint8Array(fileBuffer)
+    } catch (error) {
+        console.error('读取二进制文件失败:', error)
+        return null
+    }
+})
 
 ipcMain.handle('search', async (event, path, filterText) => {
   return search(path, filterText)
@@ -746,3 +818,200 @@ async function search(storePath,filterText,dirPath = storePath, results = [], fl
 
   return results
 }
+
+//全屏按钮
+ipcMain.handle('toggle-fullscreen', () => {
+  if (win.isFullScreen()) {
+    win.setFullScreen(false);
+  } else {
+    win.setFullScreen(true);
+  }
+});
+
+// 添加窗口控制函数
+ipcMain.handle('minimize-window', () => {
+  if (win) {
+    win.minimize();
+  }
+});
+
+ipcMain.handle('maximize-window', () => {
+  if (win) {
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  }
+});
+
+ipcMain.handle('close-window', () => {
+  if (win) {
+    win.close();
+  }
+});
+
+// 安装Python包（支持环境选择）
+ipcMain.handle('installPythonPackageWithEnvironment', async (event, { 
+  packageName, 
+  environment = 'safe' 
+}) => {
+  try {
+    let result
+    
+    if (environment === 'trusted') {
+      result = await trustedPythonService.installPackage(packageName)
+    } else {
+      result = await pythonService.installPackage(packageName)
+    }
+    
+    return result
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `安装包 ${packageName} 失败: ${error.message}`,
+      error: error.message
+    }
+  }
+})
+// 列出已安装的包（支持环境选择）
+ipcMain.handle('listPythonPackagesWithEnvironment', async (event, environment = 'safe') => {
+  try {
+    let result
+    
+    if (environment === 'trusted') {
+      result = await trustedPythonService.listPackages()
+    } else {
+      result = await pythonService.listPackages()
+    }
+    
+    return result
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.message
+    }
+  }
+})
+
+// 执行Python脚本文件（支持环境选择）
+ipcMain.handle('executePythonCodeWithEnvironment', async (event, params) => {
+  console.log('[主进程] 收到 executePythonCodeWithEnvironment 请求')
+  
+  try {
+    // 验证参数
+    if (!params) {
+      console.error('[主进程] 错误: 参数为空')
+      return {
+        success: false,
+        error: '参数不能为空',
+        timestamp: Date.now()
+      }
+    }
+    
+    const { code, environment } = params
+    
+    console.log(`[主进程] 环境: ${environment}, 代码长度: ${code?.length || 0}`)
+    
+    if (!code || typeof code !== 'string') {
+      return {
+        success: false,
+        error: '代码内容不能为空',
+        timestamp: Date.now()
+      }
+    }
+    
+    // 根据环境选择执行方式
+    if (environment) {
+      console.log('[主进程] 使用可信环境执行')
+      
+      try {
+        // 使用 trustedPythonService 执行代码
+        const result = await trustedPythonService.executeCode(code)
+        
+        console.log('[主进程] 可信环境执行完成:', {
+          success: result.success,
+          outputLength: result.output?.length || 0,
+          error: result.error?.substring(0, 100) || '无错误'
+        })
+        
+        return {
+          success: result.success,
+          result: result.result,
+          output: result.output,
+          error: result.error,
+          logs: result.logs,
+          executionTime: result.executionTime,
+          rawOutput: result.rawOutput
+        }
+      } catch (error: any) {
+        console.error('[主进程] 可信环境执行异常:', error)
+        return {
+          success: false,
+          error: `可信环境执行异常: ${error.message}`,
+          stack: error.stack,
+          timestamp: Date.now()
+        }
+      }
+      
+    } else if (!environment) {
+      console.log('[主进程] 使用安全环境执行')
+      // 安全环境执行逻辑...
+      
+      return {
+        success: true,
+        result: '安全环境执行结果',
+        output: '安全环境输出',
+        timestamp: Date.now()
+      }
+      
+    } else {
+      return {
+        success: false,
+        error: `未知环境类型: ${environment}`,
+        timestamp: Date.now()
+      }
+    }
+    
+  } catch (error: any) {
+    console.error('[主进程] IPC处理器异常:', error)
+    
+    // 确保返回一个有效的对象
+    return {
+      success: false,
+      error: `IPC处理器异常: ${error.message}`,
+      stack: error.stack,
+      timestamp: Date.now()
+    }
+  }
+})
+//检查Python安装
+ipcMain.handle('checkPythonInstallation', async () => {
+  return await pythonService.checkInstallation()
+})
+
+/**
+// 安全执行 Python 代码
+ipcMain.handle('executePythonCode', async (event, { code, input = '' }) => {
+  return await pythonService.executeCode(code, input)
+})
+
+// 安装 Python 包
+ipcMain.handle('installPythonPackage', async (event, packageName) => {
+  return await pythonService.installPackage(packageName)
+})
+
+// 列出已安装的 Python 包
+ipcMain.handle('listPythonPackages', async (event) => {
+  return await pythonService.listPackages()
+})
+
+// 执行 Python 脚本文件
+ipcMain.handle('executePythonScript', async (event, scriptPath, args = []) => {
+  return await pythonService.executeScript(scriptPath, args)
+}) */
+
+// 验证 Python 代码安全性
+ipcMain.handle('validatePythonCode', async (event, code) => {
+  return pythonService.validateCodeSecurity(code)
+})
