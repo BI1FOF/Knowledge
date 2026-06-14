@@ -19,6 +19,9 @@
     content?: string;
   }>()
 
+  // Word文档内容缓存
+  const wordContent = ref('')
+
   const data = computed(() => {
     const content = props.content ?? ''
     const path = props.path ?? ''
@@ -37,6 +40,7 @@
     }
     
     const isMd = extension === '.md' || (extension === '' && /^\s*#/.test(content))
+    const isWord = extension === '.docx' || extension === '.doc'
     const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'].includes(extension)
     const isVideo = ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm'].includes(extension)
     const isTxt = extension === '.txt'
@@ -46,6 +50,7 @@
       path, 
       extension, 
       isMd, 
+      isWord,
       isImage, 
       isVideo, 
       isTxt,
@@ -58,6 +63,8 @@
   let toc=ref([] as any) //目录
   let metaVisible = ref(false)
   let metaForm = ref([] as any)
+  let isLoadingWord = ref(false) // Word文档加载状态
+  let wordError = ref('') // Word文档错误信息
   
   const md: MarkdownIt = new MarkdownIt({
     html: true,
@@ -76,19 +83,66 @@
   .use(tocAndAnchor, { anchorLink:false })
   .use(mark)
 
+  // 加载Word文档内容
+  const loadWordContent = async function() {
+    const cur = data.value
+    if (!cur.path || !cur.isWord) return
+    
+    isLoadingWord.value = true
+    wordError.value = ''
+    
+    try {
+      const result = await window.ipcRenderer.invoke('readFile', cur.path)
+      
+      // 处理后端返回的对象格式
+      let content = ''
+      if (typeof result === 'object' && result !== null) {
+        if (result.success === false) {
+          wordError.value = result.content || result.error || '读取Word文档失败'
+          content = ''
+        } else {
+          content = result.content || ''
+        }
+      } else {
+        content = result || ''
+      }
+      
+      wordContent.value = content
+      
+      // 如果有内容，渲染为Markdown
+      if (content) {
+        await RenderMarkdown(content)
+      }
+    } catch (err: any) {
+      console.error('加载Word文档失败:', err)
+      wordError.value = err.message || '加载Word文档失败'
+    } finally {
+      isLoadingWord.value = false
+    }
+  }
+
   //更新目录和预览
   const init=async function(){
     prep.value=''
     // 如果没有通过 props 传入数据，则不处理
     const hasProp = props.content !== undefined || props.path !== undefined
     if (!hasProp) return;
+    
     const cur = data.value
     if (!cur) return;
+    
+    // 如果是Word文档，加载Word内容
+    if (cur.isWord) {
+      await loadWordContent()
+      return
+    }
+    
     const content = cur.content ?? ''
     if (cur.isMd){
       RenderMarkdown(content)
     }
   }
+  
   //渲染markdown
   const RenderMarkdown= async function(content?: string) {
     const cur = data.value
@@ -112,6 +166,7 @@
       }
     }
   }
+  
   // 去除文本开头的 YAML frontmatter（以 `---` 包围）以便预览时不显示元数据
   function stripFrontmatter(content: string) {
     if (!content || typeof content !== 'string') return content
@@ -121,19 +176,31 @@
     }
     return content
   }
+  
   let selectedText = ref("");
+  
   //发声
   async function speak() {
-    let text = (data.value && data.value.content) || '';
+    let text = "";
+    const cur = data.value
+    
+    if (cur.isWord) {
+      text = wordContent.value || '';
+    } else {
+      text = cur.content || '';
+    }
+    
     if(selectedText.value!=""){
       text = selectedText.value;
     }
     store.tts(text)
   }
+  
   //获取选中的文字
   const handleSelection=function() {
     selectedText.value = window.getSelection()?.toString()||'';
   }
+  
   //当点击保存后刷新本页
   async function save(e:any) {
     if (e.keyCode == 83 && (navigator.platform.match("Mac") ? e.metaKey : e.ctrlKey)){
@@ -142,11 +209,13 @@
       init()
     }
   }
+  
   function sleep(interval:any){
     return new Promise((resolve)=>    
       setTimeout(resolve, interval)
     )
   }
+  
   let ifMenu=ref(false)
 
   const openMetaEditor = async function(e?: any){
@@ -240,7 +309,14 @@
 
   const openToc = async function(){
     const cur = data.value
-    const content = cur?.content ?? ''
+    let content = ''
+    
+    if (cur.isWord) {
+      content = wordContent.value || ''
+    } else {
+      content = cur?.content ?? ''
+    }
+    
     await RenderMarkdown(content)
     iftoc.value = true
   }
@@ -272,7 +348,7 @@
 
 <template >
   <div class="md">
-    <div class="nav resize" v-if="iftoc&&(data.isMd || toc.length>0)">
+    <div class="nav resize" v-if="iftoc&&(data.isMd || (data.isWord && wordContent) || toc.length>0)">
       <div style="position: absolute;width:100%;height:100%;display: flex;flex-direction: column;">
         <div class="toc scoll">
           <ul>
@@ -290,22 +366,41 @@
     </div>
     
     <div class="content">
-      <!-- 菜单按钮只对 Markdown 文件显示 -->
-      <div v-if="data && data.isMd" class="button" style="position: absolute;right:10px;z-index:999" @click="ifMenu=!ifMenu">
+      <!-- 菜单按钮只对 Markdown 和 Word 文件显示 -->
+      <div v-if="data && (data.isMd || data.isWord)" class="button" style="position: absolute;right:10px;z-index:999" @click="ifMenu=!ifMenu">
         <i class="fa fa-angle-down"></i>
       </div>
-      <div v-if="ifMenu && data.isMd" class="menus" @mouseleave="ifMenu=false">
-        <div @click="openToc" v-if="!iftoc"><i class="fa fa-bars"></i> 打开目录</div>
-        <div @click="iftoc=false" v-if="iftoc"><i class="fa fa-bars"></i> 关闭目录</div>
-        <div @click="speak"><i class="fa fa-volume-up"></i> 朗读文章</div>
-        <div @click="store.copyToClipboard(data.content)"><i class="fa fa-copy"></i> 复制全文</div>
-        <div @click="store.openByApp(data.path)"><i class="fa fa-certificate"></i> 软件打开</div>
-        <div @click="openMetaEditor" v-if="data.path"><i class="fa fa-edit"></i> 编辑标签</div>
+      <div v-if="ifMenu && (data.isMd || data.isWord)" class="menus" @mouseleave="ifMenu=false">
+        <div @click="openToc" v-if="!iftoc"><i class="fa fa-bars"></i> {{store.locales=='zh'?'打开目录':'Open Table of Contents'}}</div>
+        <div @click="iftoc=false" v-if="iftoc"><i class="fa fa-bars"></i> {{store.locales=='zh'?'关闭目录':'Close Table of Contents'}}</div>
+        <div @click="speak"><i class="fa fa-volume-up"></i> {{store.locales=='zh'?'朗读文章':'Read Article'}}</div>
+        <div @click="store.copyToClipboard(data.isWord ? wordContent : data.content)"><i class="fa fa-copy"></i> {{store.locales=='zh'?'复制全文':'Copy Full Text'}}</div>
+        <div @click="store.openByApp(data.path)"><i class="fa fa-certificate"></i> {{store.locales=='zh'?'软件打开':'Open with App'}}</div>
+        <div @click="openMetaEditor" v-if="data.path&&data.isMd"><i class="fa fa-edit"></i> {{store.locales=='zh'?'编辑标签':'Edit Metadata'}} </div>
       </div>
       
       <!-- 空内容提示 -->
-      <div class="nodata" v-if="data.content==''">
-        <h5 style="width: 100%;text-align: center;">文件无内容和数据</h5>
+      <div class="nodata" v-if="!data.isWord && data.content=='' && !data.isImage && !data.isVideo">
+        <h5 style="width: 100%;text-align: center;">{{store.locales=='zh'?'文件无内容和数据':'No Data'}}</h5>
+      </div>
+      
+      <!-- Word文档加载状态 -->
+      <div v-if="data.isWord && isLoadingWord" class="loading-state">
+        <i class="fa fa-spinner fa-spin"></i>
+        <span>{{store.locales=='zh'?'正在加载Word文档...':'Loading Word document...'}}</span>
+      </div>
+      
+      <!-- Word文档错误信息 -->
+      <div v-else-if="data.isWord && wordError" class="error-state">
+        <i class="fa fa-exclamation-triangle"></i>
+        <span>{{ wordError }}</span>
+        <button @click="loadWordContent" class="retry-btn">
+          <i class="fa fa-refresh"></i> {{store.locales=='zh'?'重试':'Retry'}}
+        </button>
+      </div>
+      
+      <!-- Word文档内容（渲染为Markdown） -->
+      <div v-else-if="data.isWord && wordContent && prep!=''" class="prep scoll" v-html="prep" @mouseup="handleSelection" @keyup="handleSelection">
       </div>
       
       <!-- 视频文件显示 -->
@@ -335,28 +430,42 @@
       </div>
       
       <!-- 其他格式文件处理 -->
-      <div class="nodata" v-if="!data.isMd && !data.isImage && !data.isVideo && !data.isTxt && data.content!=''">
+      <div class="nodata" v-if="!data.isMd && !data.isWord && !data.isImage && !data.isVideo && !data.isTxt && data.content!=''">
         <button @click="store.openByApp(data.path)">外部打开</button>
       </div>
     </div>
     
     <!-- 元数据编辑弹窗 -->
-    <div v-if="metaVisible" class="config" style="z-index:9999;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);">
-      <div style="display:flex;align-items:center;padding:6px;border-bottom:1px solid var(--borderColor);background:var(--menuColor)">
+    <div v-if="metaVisible" style="z-index:9999;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:80%">
+      <div style="display:flex;align-items:center;padding:6px;background:var(--menuColor)">
         <div style="flex:1;font-weight:600">{{store.locales=='zh'?'编辑元数据':'Edit Metadata'}}</div>
         <div style="padding-left:6px;"><button @click="metaVisible=false">{{store.locales=='zh'?'关闭':'Close'}}</button></div>
       </div>
-      <div class="body" style="padding:8px;max-height:60vh;overflow:auto;background:var(--backgroundColor);border:1px solid var(--borderColor)">
+      <div style="padding:5px;max-height:60vh;overflow:auto;background:var(--backgroundColor);border:1px solid var(--borderColor)">
         <div v-if="metaForm.length===0" style="color:var(--borderColor);margin-bottom:8px;">{{store.locales=='zh'?'暂无元数据':'No metadata'}}</div>
-        <div v-for="(entry, idx) in metaForm" :key="idx" style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
-          <input v-model="entry.key" placeholder="key" style="width:30%;" />
-          <input v-model="entry.value" placeholder="value" style="flex:1;" />
-          <div @click="metaForm.splice(idx,1)" title="删除"><i class="fa fa-trash"></i></div>
+        <div v-for="(entry, idx) in metaForm" :key="idx" style="display:flex;margin-bottom:3px;align-items:center;">
+          <input v-model="entry.key" placeholder="key" style="width:25%;margin-left: 0px;" :style="(entry.key === 'summary' || entry.key === '摘要' || entry.key === 'abstract') ? { height: '68px' } : {}" />
+          <template v-if="entry.key === 'summary' || entry.key === '摘要' || entry.key === 'abstract'">
+            <textarea 
+              v-model="entry.value" 
+              placeholder="摘要内容..."
+              style="flex:1;min-height:60px;resize:vertical;margin:2px;"
+              rows="3"
+            ></textarea>
+          </template>
+          <template v-else>
+            <input 
+              v-model="entry.value" 
+              placeholder="value" 
+              style="flex:1;margin-right:5px;" 
+            />
+          </template>
+          <div style="margin-left: 3px;" @click="metaForm.splice(idx,1)" title="删除"><i class="fa fa-trash"></i></div>
         </div>
-        <div style="margin-bottom:8px;">
+        <div style="margin-bottom:5px;">
           <button @click="metaForm.push({key:'',value:''})">{{store.locales=='zh'?'添加字段':'Add field'}}</button>
         </div>
-        <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <div style="display:flex;gap:5px;justify-content:flex-end;">
           <button @click="metaVisible=false">{{store.locales=='zh'?'取消':'Cancel'}}</button>
           <button @click="saveMeta">{{store.locales=='zh'?'保存':'Save'}}</button>
         </div>
@@ -450,7 +559,6 @@
     max-width:350px;
     height:calc(100%);
     position: relative;
-    border-left:1px solid var(--borderColor);
     border-right:1px solid var(--borderColor)
   }
   .nav::-webkit-scrollbar {
@@ -536,6 +644,8 @@
     background-color:var(--fontColor);
   }
   .nodata{
+    display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;
     height: 100%;
@@ -543,14 +653,12 @@
     overflow: hidden;
   }
   .nodata .panel {
-    /* 样式设置，可以根据需要进行自定义修改 */
     height:fit-content;
     width:150px;
     font-size: 16px;
     text-align: center;
   }
   .nodata button {
-    /* 样式设置，可以根据需要进行自定义修改 */
     height:35px;
     border-radius: 5px;
     width:150px;
@@ -558,8 +666,38 @@
     background-color: var(--menuColor);
     border: 1px solid var(--borderColor);
     font-size: 16px;
-    position:absolute;
-    top: 0px;
-    left: 0px;
+  }
+  .loading-state, .error-state {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    gap: 15px;
+    color: var(--fontColor);
+  }
+  .loading-state i {
+    font-size: 30px;
+    margin-bottom: 10px;
+  }
+  .error-state i {
+    font-size: 40px;
+    color: #ff6b6b;
+    margin-bottom: 10px;
+  }
+  .retry-btn {
+    width: auto;
+    padding: 8px 16px;
+    margin-top: 10px;
+    cursor: pointer;
+  }
+  .retry-btn i {
+    font-size: 14px;
+    margin-right: 5px;
+  }
+  input{
+    border-radius: 5px;
+    margin: 2px;
+    border: 1px solid var(--borderColor);
   }
 </style>

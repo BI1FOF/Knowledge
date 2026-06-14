@@ -25,7 +25,7 @@
            @dragleave="isContentDragOver = false"
            @drop="handleContentDrop">
         
-        <div class="tree-node-toggle" @click.stop="$emit('toggleExpand', item)">
+        <div class="tree-node-toggle" @click.stop="handleToggleExpand">
           <i class="fa" :class="item.expanded ? 'fa-chevron-down' : 'fa-chevron-right'"></i>
         </div>
         
@@ -105,12 +105,13 @@
 import { ref, computed } from 'vue'
 import draggable from 'vuedraggable'
 
-// 更新类型定义 - 移除 type 字段和 content 字段
+// 更新类型定义，与 Home.vue 中的 Item 接口保持一致
 type ItemStatus = '灵感' | '规划' | '待办' | '进行中' | '已完成'
 
 interface Item {
   id: number;
-  title: string;  // 统一使用 title 字段
+  title: string;
+  content?: string;  // 添加 content 字段
   status: ItemStatus;
   createdTime: Date;
   startTime?: Date;
@@ -121,6 +122,8 @@ interface Item {
   expanded?: boolean;
   relatedId?: number;
   _order?: number;
+  filePath?: string;  // 添加 filePath 字段
+  isFolder?: boolean;  // 添加 isFolder 字段
 }
 
 const props = defineProps<{
@@ -223,7 +226,7 @@ const handleContentDrop = (event: DragEvent) => {
   
   // 自动展开接收拖拽的节点
   if (!props.item.expanded) {
-    emit('toggleExpand', props.item)
+    handleToggleExpand()
   }
 }
 
@@ -308,6 +311,11 @@ const handleDragChange = (evt: any) => {
 // 处理子节点移动事件
 const handleItemMoved = (payload: { movedItem: Item, newParentId?: number, targetItemId?: number, position?: 'before' | 'after' | 'inside' }) => {
   emit('itemMoved', payload)
+}
+
+// 处理展开/折叠
+const handleToggleExpand = () => {
+  emit('toggleExpand', props.item)
 }
 </script>
 

@@ -654,6 +654,14 @@ def safe_json_dumps(obj):
 
 def main():
     try:
+        # 设置标准输出的编码为 UTF-8
+        import sys
+        import io
+        
+        # 强制设置标准输出为 UTF-8
+        if sys.stdout.encoding != 'utf-8':
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        
         # 解析输入数据
         input_data_raw = ${inputJson}
         
@@ -666,7 +674,11 @@ def main():
         
         # 使用安全的 JSON 输出
         output_json = safe_json_dumps(result)
-        print(output_json)
+        
+        # 直接打印，不通过 print 函数
+        sys.stdout.write(output_json)
+        sys.stdout.write('\\n')
+        sys.stdout.flush()
         
     except Exception as e:
         error_result = {
@@ -677,7 +689,9 @@ def main():
         }
         # 使用安全的 JSON 输出
         output_json = safe_json_dumps(error_result)
-        print(output_json)
+        sys.stdout.write(output_json)
+        sys.stdout.write('\\n')
+        sys.stdout.flush()
 
 if __name__ == "__main__":
     main()

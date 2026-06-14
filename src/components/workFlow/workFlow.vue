@@ -18,12 +18,10 @@
             :disabled="!runner?.isRunning">
             <i class="fa fa-stop"></i>
           </button>
-          <button 
-            class="toolbar-btn" 
-            :class="{ active: operationMode === 'linking' }"
-            @click="toggleLinkMode"
-            :title="t('link_mode')"
-          >
+          <button class="toolbar-btn" @click="resetNodeStatuses" :title="t('reset_status')">
+            <i class="fa fa-refresh"></i>
+          </button>
+          <button class="toolbar-btn" :class="{ active: operationMode === 'linking' }" @click="toggleLinkMode" :title="t('link_mode')">
             <i class="fa fa-link"></i>
           </button>
           <button class="toolbar-btn" @click="resetWorkflow" :title="t('reset_workflow')">
@@ -35,10 +33,44 @@
           <button class="toolbar-btn" @click="zoomIn" :title="t('zoom_in')">
             <i class="fa fa-search-plus"></i>
           </button>
+          <button class="toolbar-btn" @click="runWorkflowBatch" 
+              title="批量运行" 
+              :class="{ disabled: !isWorkflowValid || runner?.isRunning || isBatchRunning }"
+              :disabled="!isWorkflowValid || runner?.isRunning || isBatchRunning">
+              <i class="fa fa-rocket"></i>
+            </button>
+            <select v-model="batchRunTimes" :disabled="isBatchRunning" title="运行次数">
+              <option :value="1">1</option>
+              <option :value="3">3</option>
+              <option :value="5">5</option>
+              <option :value="10">10</option>
+              <option :value="20">20</option>
+              <option :value="50">50</option>
+              <option :value="100">100</option>
+              <option :value="200">200</option>
+              <option :value="500">500</option>
+              <option :value="1000">1000</option>
+            </select>
+            <button class="toolbar-btn" @click="saveBatchResultsToFolder" 
+              title="保存批量运行结果到文件夹"
+              :disabled="batchResults.length === 0 || isBatchRunning"
+              :class="{ disabled: batchResults.length === 0 || isBatchRunning }">
+              <i class="fa fa-file-excel-o"></i>
+            </button>
+            
+            <button class="toolbar-btn" @click="clearBatchResults" 
+              title="清空批量运行结果"
+              :disabled="batchResults.length === 0 || isBatchRunning"
+              :class="{ disabled: batchResults.length === 0 || isBatchRunning }">
+              <i class="fa fa-trash"></i>
+            </button>
         </div>
       </div>
       <div class="toolbar-right">
         <div class="toolbar-item stats">
+          <span v-if="isBatchRunning" class="batch-spinner">
+            <i class="fa fa-spinner fa-spin"></i> {{ Math.round(batchProgress) }}%
+          </span>
           <span class="stat-item">
             <i class="fa fa-object-group"></i>
             {{ nodesCount }}
@@ -227,7 +259,6 @@
                 class="link"
                 :class="{ 
                   'branch-link': link.branch || link.sourcePort,  // 文件节点和决策节点都使用虚线
-                  'port-link': false  // 移除端口连接的特殊样式
                 }"
                 stroke-width="2"
                 fill="none"
@@ -328,7 +359,7 @@
                     style="cursor: crosshair">
                     <circle r="6" :fill="getConnectorColor(node, 'start-prompt', 'prompt')" 
                       stroke="var(--backgroundColor)" stroke-width="2" />
-                    <text x="0" y="-10" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
+                    <text x="0" y="15" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
                       提示词
                     </text>
                   </g>
@@ -339,7 +370,7 @@
                     style="cursor: crosshair">
                     <circle r="6" :fill="getConnectorColor(node, 'start-file', 'file')" 
                       stroke="var(--backgroundColor)" stroke-width="2" />
-                    <text x="0" y="-10" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
+                    <text x="0" y="15" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
                       文件路径
                     </text>
                   </g>
@@ -360,9 +391,6 @@
                     style="cursor: crosshair">
                     <circle r="6" :fill="getConnectorColor(node, 'default')" 
                       stroke="var(--backgroundColor)" stroke-width="2" />
-                    <text x="0" y="-10" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
-                      默认
-                    </text>
                   </g>
                   
                   <!-- 分支连接点（在节点底部边界均匀分布） -->
@@ -394,7 +422,7 @@
                      style="cursor: crosshair">
                     <circle r="6" :fill="getConnectorColor(node, 'file-default', 'default')" 
                             stroke="var(--backgroundColor)" stroke-width="2" />
-                    <text x="0" y="10" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
+                    <text x="0" y="15" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
                       全部
                     </text>
                   </g>
@@ -406,7 +434,7 @@
                      style="cursor: crosshair">
                     <circle r="6" :fill="getConnectorColor(node, 'file-port', port.id)"
                             stroke="var(--backgroundColor)" stroke-width="2" />
-                    <text x="0" y="10" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
+                    <text x="0" y="15" text-anchor="middle" font-size="9px" fill="var(--fontColor)">
                       {{ port.name }}
                     </text>
                   </g>
@@ -626,14 +654,14 @@
                   </div>
                 </div>
                 
-                <div v-if="selectedNode.decisionBranches && selectedNode.decisionBranches.length > 0" 
-                    class="branches-table-container scoll" style="margin-bottom: 10px; max-height: 200px; overflow-y: auto;">
+                <div v-if="selectedNode.decisionBranches && selectedNode.decisionBranches.length > 0">
                   <table class="branches-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
                     <thead>
                       <tr style="background-color: rgba(0, 0, 0, 0.05); position: sticky; top: 0;">
-                        <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('branch_name') }}</th>
-                        <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('branch_description') }}</th>
-                        <th style="padding: 4px; border: 1px solid var(--borderColor); width: 60px; text-align: center;">{{ t('delete') }}</th>
+                        <th style="padding: 4px; border: 1px solid var(--borderColor); width: 80px;">{{ t('branch_name') }}</th>
+                        <th style="padding: 4px; border: 1px solid var(--borderColor); width: 100px;">{{ t('branch_description') }}</th>
+                        <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('data_template') }}</th>
+                        <th style="padding: 4px; border: 1px solid var(--borderColor); width: 50px; text-align: center;">{{ t('delete') }}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -654,6 +682,14 @@
                           />
                         </td>
                         <td style="padding: 2px; border: 1px solid var(--borderColor);">
+                          <input 
+                            type="text" 
+                            v-model="branch.dataTemplate" 
+                            style="width: calc(100% - 8px); padding: 3px; font-size: 11px; border: 1px solid var(--borderColor); border-radius: 3px; font-family: monospace;"
+                            :placeholder="'{input}'"
+                          />
+                        </td>
+                        <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
                           <button 
                             class="property-btn danger small" 
                             @click="deleteDecisionBranch(branch.id)"
@@ -703,7 +739,8 @@
                 <label class="property-label">{{ t('file_path') }}</label>
                 <div class="property-input">
                   <div style="display: flex; gap: 5px">
-                    <input type="text" v-model="selectedNode.prompt" readonly :placeholder="t('drag_file')" />
+                    <input type="text" :value="getFileName(selectedNode.prompt)" readonly :placeholder="t('drag_file')" />
+                    <input type="hidden" v-model="selectedNode.prompt" />
                     <button class="property-btn" style="margin-top:5px" @click="selectFile">
                       <i class="fa fa-folder-open"></i>
                     </button>
@@ -726,7 +763,6 @@
                 <small>{{ t('full_file_mode_help') }}</small>
               </div>
               
-              <!-- 模板匹配模式配置 -->
               <div v-if="selectedNode.fileMode === 'template'">
                 <div class="property-group" style="margin-top: 10px; padding: 8px; background-color: rgba(0, 0, 0, 0.02); border-radius: 5px;">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
@@ -746,19 +782,53 @@
                     </small>
                   </div>
                   
-                  <div v-if="selectedNode.fileTemplates && selectedNode.fileTemplates.length > 0" 
-                      class="templates-table-container scoll" style="margin-bottom: 10px; overflow-y: auto;">
+                  <div v-if="selectedNode.fileTemplates && selectedNode.fileTemplates.length > 0">
                     <table class="templates-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
                       <thead>
                         <tr style="background-color: rgba(0, 0, 0, 0.05); position: sticky; top: 0;">
+                          <th style="padding: 4px; border: 1px solid var(--borderColor);">ID</th>
                           <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('template_name') }}</th>
                           <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('pattern') }}</th>
-                          <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('output_port') }}</th>
-                          <th style="padding: 4px; border: 1px solid var(--borderColor); width: 40px; text-align: center;">{{ t('delete') }}</th>
+                          <th style="padding: 4px; border: 1px solid var(--borderColor); width: 10px;">🔗</th>
+                          <th style="padding: 4px; border: 1px solid var(--borderColor); width: 10px;">{{ t('status') }}</th>
+                          <th style="padding: 4px; border: 1px solid var(--borderColor); width: 10px; text-align: center;">{{ t('delete') }}</th>
                         </tr>
                       </thead>
                       <tbody>
+                        <!-- 默认端口行 -->
+                        <tr v-if="getFileNodeDefaultPortEnabled(selectedNode)">
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
+                            full
+                          </td>
+                          <td style="padding: 2px; border: 1px solid var(--borderColor);">
+                            <div style="display: flex; align-items: center; gap: 5px;">
+                              <i class="fa fa-file-text" style="color: #4CAF50; font-size: 12px;"></i>
+                              <span>{{ t('default_port') }}</span>
+                            </div>
+                          </td>
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); color: var(--fontColor); opacity: 0.7;">
+                            {{ t('full_file') }}
+                          </td>
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
+                            {{ getPortConnectionCount(selectedNode.id, 'default') }}
+                          </td>
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
+                            <i class="fa fa-check-circle" style="color: #4CAF50;"></i>
+                          </td>
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
+                            <div style="height: 24px; display: flex; align-items: center; justify-content: center;">
+                              <span style="color: var(--fontColor); opacity: 0.5; font-size: 10px;">-</span>
+                            </div>
+                          </td>
+                        </tr>
+                        
+                        <!-- 模板端口行 -->
                         <tr v-for="(template, index) in selectedNode.fileTemplates" :key="index">
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
+                            <code style="font-size: 10px; background: rgba(0,0,0,0.05); padding: 2px 5px; border-radius: 3px;">
+                              {{ index + 1 }}
+                            </code>
+                          </td>
                           <td style="padding: 2px; border: 1px solid var(--borderColor);">
                             <input 
                               type="text" 
@@ -775,16 +845,17 @@
                               :placeholder="t('pattern_placeholder')"
                             />
                           </td>
-                          <td style="padding: 2px; border: 1px solid var(--borderColor);">
-                            <code style="font-size: 10px; background: rgba(0,0,0,0.05); padding: 2px 5px; border-radius: 3px;">
-                              output{{ index + 1 }}
-                            </code>
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
+                            {{ getPortConnectionCount(selectedNode.id, `output${index + 1}`) }}
+                          </td>
+                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
+                            <i class="fa fa-check-circle" style="color: #4CAF50;"></i>
                           </td>
                           <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
                             <button 
-                              class="property-btn danger small" 
+                              class="property-btn danger" 
                               @click="deleteFileTemplate(index)"
-                              style="font-size: 10px; padding: 2px 6px;"
+                              style="font-size: 10px; padding: 2px 6px; width: 100%;"
                               :title="t('delete_template')"
                             >
                               <i class="fa fa-trash"></i>
@@ -798,66 +869,6 @@
                   <div v-else class="empty-templates-message" style="padding: 10px; text-align: center; color: var(--fontColor); opacity: 0.5; font-size: 12px;">
                     <i class="fa fa-info-circle"></i> {{ t('no_templates_configured') }}
                   </div>
-                </div>
-                
-                <!-- 输出端口状态 -->
-                <div class="property-group" style="margin-top: 10px; padding: 8px; background-color: rgba(0, 0, 0, 0.02); border-radius: 5px;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                    <h4 style="margin: 0; font-size: 14px; display: flex; align-items: center; gap: 5px;">
-                      <i class="fa fa-plug"></i> {{ t('output_ports_status') }}
-                    </h4>
-                    <button class="property-btn small" @click="refreshFileNodePorts" 
-                      style="font-size: 11px; padding: 3px 8px; height: auto;">
-                      <i class="fa fa-sync"></i> {{ t('refresh_ports') }}
-                    </button>
-                  </div>
-                  
-                  <div v-if="getFileNodeOutputPorts(selectedNode).length > 0" 
-                      class="ports-table-container" style="margin-bottom: 10px;">
-                    <table class="ports-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
-                      <thead>
-                        <tr style="background-color: rgba(0, 0, 0, 0.05); position: sticky; top: 0;">
-                          <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('port_name') }}</th>
-                          <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('template') }}</th>
-                          <th style="padding: 4px; border: 1px solid var(--borderColor);">{{ t('connections_count') }}</th>
-                          <th style="padding: 4px; border: 1px solid var(--borderColor); width: 40px;">{{ t('status') }}</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <!-- 默认端口 -->
-                        <tr v-if="getFileNodeDefaultPortEnabled(selectedNode)">
-                          <td style="padding: 2px; border: 1px solid var(--borderColor);">
-                            <i class="fa fa-file-text" style="margin-right: 5px; color: #4CAF50;"></i>
-                            {{ t('default_port') }}
-                          </td>
-                          <td style="padding: 2px; border: 1px solid var(--borderColor);">{{ t('full_file') }}</td>
-                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
-                            {{ getPortConnectionCount(selectedNode.id, 'default') }}
-                          </td>
-                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
-                            <i class="fa fa-check-circle" style="color: #4CAF50;"></i>
-                          </td>
-                        </tr>
-                        
-                        <!-- 模板端口 -->
-                        <tr v-for="(port, index) in getFileNodeOutputPorts(selectedNode)" :key="port.id">
-                          <td style="padding: 2px; border: 1px solid var(--borderColor);">
-                            <i class="fa fa-code-fork" style="margin-right: 5px; color: #2196F3;"></i>
-                            {{ port.name }}
-                          </td>
-                          <td style="padding: 2px; border: 1px solid var(--borderColor);">
-                            {{ port.description }}
-                          </td>
-                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
-                            {{ getPortConnectionCount(selectedNode.id, port.id) }}
-                          </td>
-                          <td style="padding: 2px; border: 1px solid var(--borderColor); text-align: center;">
-                            <i class="fa fa-check-circle" style="color: #4CAF50;"></i>
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
                   
                   <div class="code-help" style="font-size: 11px; color: var(--fontColor); opacity: 0.7; margin-top: 5px;">
                     <small>
@@ -865,6 +876,11 @@
                       {{ t('port_help') }}
                     </small>
                   </div>
+                  
+                  <button class="property-btn small" @click="refreshFileNodePorts" 
+                    style="font-size: 11px; padding: 3px 8px; height: auto; margin-top: 8px; width: 100%;">
+                    <i class="fa fa-sync"></i> {{ t('refresh_ports') }}
+                  </button>
                 </div>
                 
                 <div class="code-help" style="font-size: 11px; color: var(--fontColor); opacity: 0.7;">
@@ -893,32 +909,29 @@
             <div v-if="selectedNode.type === 'python'">
               <div v-if="upstreamNodeInfo.length > 0" class="upstream-info">
                 <div class="upstream-header">
-                  <i class="fa fa-code-branch"></i>
                   <span>{{ t('upstream_info') }}</span>
                 </div>
-                <div class="upstream-table-container">
-                  <table class="upstream-table">
-                    <thead>
-                      <tr>
-                        <th>{{ t('upstream_node_id') }}</th>
-                        <th>{{ t('upstream_node_name') }}</th>
-                        <th>{{ t('upstream_node_type') }}</th>
-                        <th>{{ t('upstream_data_key') }}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="info in upstreamNodeInfo" :key="info.id">
-                        <td>
-                          <i :class="'fa '+info.icon" :style="{ color: info.iconColor, marginRight: '5px' }"></i>
-                          {{ info.id }}
-                        </td>
-                        <td>{{ info.name }}</td>
-                        <td>{{ info.type }}</td>
-                        <td><code>{{ info.key }}</code></td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+                <table class="upstream-table">
+                  <thead>
+                    <tr>
+                      <th>{{ t('upstream_node_id') }}</th>
+                      <th>{{ t('upstream_node_name') }}</th>
+                      <th>{{ t('upstream_node_type') }}</th>
+                      <th>{{ t('upstream_data_key') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="info in upstreamNodeInfo" :key="info.id">
+                      <td>
+                        <i :class="'fa '+info.icon" :style="{ color: info.iconColor, marginRight: '5px' }"></i>
+                        {{ info.id }}
+                      </td>
+                      <td>{{ info.name }}</td>
+                      <td>{{ info.type }}</td>
+                      <td><code>{{ info.key }}</code></td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
               
               <div class="code-help">
@@ -1067,8 +1080,7 @@
                   </button>
                 </div>
                 
-                <div v-if="selectedNode.structuredColumns && selectedNode.structuredColumns.length > 0" 
-                     class="columns-table-container scoll" style="margin-bottom: 10px; max-height: 180px; overflow-y: auto;">
+                <div v-if="selectedNode.structuredColumns && selectedNode.structuredColumns.length > 0">
                   <table class="columns-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
                     <thead>
                       <tr style="background-color: rgba(0, 0, 0, 0.05); position: sticky; top: 0;">
@@ -1144,8 +1156,7 @@
                   </button>
                 </div>
                 
-                <div v-if="selectedNode.structuredData && selectedNode.structuredData.length > 0" 
-                     class="data-table-container" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px;">
+                <div v-if="selectedNode.structuredData && selectedNode.structuredData.length > 0">
                   <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 11px;">
                     <thead>
                       <tr style="position: sticky; top: 0; background-color: var(--backgroundColor); z-index: 1;">
@@ -1296,6 +1307,7 @@ import { onMounted, onBeforeUnmount, ref, computed, watch, nextTick, type Ref } 
 import * as d3 from 'd3'
 import { usestore } from '../../store'
 import block_md from '../block_md.vue'
+import * as XLSX from 'xlsx'
 
 // 导入工作流运行器
 import { WorkflowRunner, type NodeData, type Link, type WorkflowData, type NodeType, type McpConfig, type FileMode, type FileTemplate } from '../../utils/workflowRunner'
@@ -1321,7 +1333,7 @@ const t = (key: string): string => {
       'start_help_new': '开始节点: 可以输入单个文本，或使用"|"分隔符传递两个参数，格式为"提示词|文件路径"。系统会自动读取文件内容并与提示词合并。',
       
       // 新增本地节点相关文本
-      'file_processing_mode': '文件处理模式',
+      'file_processing_mode': '处理模式',
       'full_file_mode': '完整文件模式',
       'template_mode': '模板匹配模式',
       'full_file_mode_help': '完整文件模式: 读取整个文件内容并作为单个字符串输出，只有一个输出端口',
@@ -1343,8 +1355,7 @@ const t = (key: string): string => {
       'output_ports_status': '输出端口状态',
       'refresh_ports': '刷新端口',
       'port_name': '端口名称',
-      'connections_count': '连接数',
-      'default_port': '默认端口',
+      'default_port': '默认',
       'full_file': '完整文件',
       'port_help': '每个模板匹配到的切片会通过对应的输出端口传递到下游节点。点击端口可以进行连接。',
       
@@ -1634,12 +1645,12 @@ const t = (key: string): string => {
       'start_help_new': 'Start Node: You can enter a single text, or use "|" separator to pass two parameters in the format "prompt|file_path". The system will automatically read the file content and combine it with the prompt.',
       
       // 新增本地节点相关文本
-      'file_processing_mode': 'File Processing Mode',
+      'file_processing_mode': 'Mode',
       'full_file_mode': 'Full File Mode',
       'template_mode': 'Template Match Mode',
       'full_file_mode_help': 'Full File Mode: Read the entire file content and output as a single string with one output port',
       'template_configuration': 'Template Configuration',
-      'add_template': 'Add Template',
+      'add_template': 'Add',
       'template_help': 'Configure match patterns and output names. The system will perform string matching and slicing based on the templates',
       'template_name': 'Template Name',
       'pattern': 'Match Pattern',
@@ -1656,8 +1667,7 @@ const t = (key: string): string => {
       'output_ports_status': 'Output Ports Status',
       'refresh_ports': 'Refresh Ports',
       'port_name': 'Port Name',
-      'connections_count': 'Connections',
-      'default_port': 'Default Port',
+      'default_port': 'Default',
       'full_file': 'Full File',
       'port_help': 'Each template matched slice will be passed to downstream nodes through the corresponding output port. Click on the port to connect.',
       
@@ -1823,8 +1833,8 @@ const t = (key: string): string => {
       
       // Property panel
       'node_properties': 'Node Properties',
-      'node_name': 'Node Name:',
-      'node_type': 'Node Type:',
+      'node_name': 'Name:',
+      'node_type': 'Type:',
       'model_selection': 'Model:',
       'prompt_input': 'Prompt:',
       'file_path': 'File Path:',
@@ -1899,8 +1909,8 @@ const t = (key: string): string => {
       'deleted': 'Deleted',
       'key_name': 'Key name',
       'upstream_node_id': 'Node ID',
-      'upstream_node_name': 'Node Name',
-      'upstream_node_type': 'Node Type',
+      'upstream_node_name': 'Name',
+      'upstream_node_type': 'Type',
       'upstream_data_key': 'Data Key',
       
       // Status texts
@@ -1986,6 +1996,7 @@ interface DecisionBranch {
   name: string
   description: string
   condition?: string // 规则决策的条件表达式
+  dataTemplate?: string // 传递给下游的数据模板，默认 {input}
 }
 
 // 决策节点配置接口
@@ -2044,15 +2055,17 @@ const defaultStructuredConfig: StructuredConfig = {
   tableDescription: ''
 }
 
+const defaultDecisionBranches: DecisionBranch[] = [
+  { id: 'branch_1', name: '分支1', description: '第一条路径', dataTemplate: '{input}' },
+  { id: 'branch_2', name: '分支2', description: '第二条路径', dataTemplate: '{input}' }
+]
+
 // 决策节点默认配置
 const defaultDecisionConfig: DecisionConfig = {
   mode: 'llm',
   prompt: '请根据以下内容进行分析决策，从提供的分支中选择最合适的一个：\n\n输入内容：{input}\n\n可用分支：{branches}\n\n请只返回分支ID，不要包含其他内容。',
   rules: '',
-  branches: [
-    { id: 'branch_1', name: '分支1', description: '第一条路径' },
-    { id: 'branch_2', name: '分支2', description: '第二条路径' }
-  ]
+  branches: defaultDecisionBranches
 }
 
 // 文件模板默认配置
@@ -2085,8 +2098,8 @@ const nodeTemplates: Record<NodeType, NodeTemplate> = {
     width: 250,
     height: 70,
     status: 'idle',
-    fileMode: 'full', // 默认完整文件模式
-    fileTemplates: [...defaultFileTemplates] // 默认模板
+    fileMode: 'full',
+    fileTemplates: [...defaultFileTemplates]
   },
   web: {
     name: t('web_node'),
@@ -2128,8 +2141,8 @@ const nodeTemplates: Record<NodeType, NodeTemplate> = {
     model: '',
     prompt: t('decision_prompt_placeholder'),
     result: t('waiting_decision'),
-    width: 280,
-    height: 90,
+    width: 250,
+    height: 70,
     status: 'idle'
   },
   python: {
@@ -2215,6 +2228,503 @@ const linkingSourceBranchId = ref<string | null>(null)
 const linkingSourcePortId = ref<string | null>(null)
 const linkingSourceStartPort = ref<'prompt' | 'file' | null>(null)
 const propertiesShow = ref<boolean>(false)
+
+// 批量运行代码
+const batchRunTimes = ref(10) // 默认运行10次
+const isBatchRunning = ref(false)
+const batchProgress = ref(0)
+const batchResults = ref<any[]>([])
+
+// 批量运行方法（不自动保存）
+const runWorkflowBatch = async () => {
+  if (!isWorkflowValid.value || runner?.value?.isRunning || isBatchRunning.value) {
+    console.warn('工作流无效或正在运行中')
+    return
+  }
+  
+  // 确认批量运行
+  const confirmMessage = `确定要运行工作流 ${batchRunTimes.value} 次吗？`
+  if (!confirm(confirmMessage)) {
+    return
+  }
+  
+  isBatchRunning.value = true
+  batchResults.value = []
+  batchProgress.value = 0
+  
+  try {
+    // 保存原始工作流数据，用于每次运行前重置
+    const originalItems = JSON.parse(JSON.stringify(items.value))
+    const originalLinks = JSON.parse(JSON.stringify(links.value))
+    
+    // 创建结果存储数组
+    const allResults: any[] = []
+    
+    for (let i = 0; i < batchRunTimes.value; i++) {
+      const roundStartTime = Date.now()
+      console.log(`开始第 ${i + 1}/${batchRunTimes.value} 轮运行`)
+      
+      // 重置节点状态
+      resetNodeStatusesForBatch()
+      
+      // 重新初始化运行器
+      initWorkflowRunner()
+      
+      // 运行工作流
+      const result = await runner.value!.run()
+      
+      const roundEndTime = Date.now()
+      
+      // 收集本轮结果
+      const roundResult = {
+        round: i + 1,
+        timestamp: new Date().toISOString(),
+        startTime: new Date(roundStartTime).toISOString(),
+        endTime: new Date(roundEndTime).toISOString(),
+        duration: roundEndTime - roundStartTime,
+        success: result.success,
+        result: result.result,
+        aggregatedResults: result.aggregatedResults,
+        executionStats: {
+          totalNodes: result.executionStats?.totalNodes || 0,
+          completedNodes: result.executionStats?.completedNodes || 0,
+          failedNodes: result.executionStats?.failedNodes || 0,
+          executionTime: result.executionStats?.executionTime || 0,
+          errors: result.executionStats?.errors || [],
+          executedNodes: result.executionStats?.executedNodes || []
+        },
+        nodeResults: collectNodeResults(),
+        executionOrder: runner.value?.executionOrder || []
+      }
+      
+      allResults.push(roundResult)
+      batchResults.value = allResults
+      batchProgress.value = ((i + 1) / batchRunTimes.value) * 100
+      
+      // 重置工作流数据到原始状态（用于下一轮）
+      resetWorkflowToOriginal(originalItems, originalLinks)
+      
+      // 短暂延迟，避免过快的连续请求
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+    
+    console.log('批量运行完成', allResults)
+    alert(`批量运行完成！\n成功: ${allResults.filter(r => r.success).length}/${batchRunTimes.value}\n请点击"保存结果"按钮保存到文件`)
+    
+  } catch (error: any) {
+    console.error('批量运行失败:', error)
+    alert(`批量运行失败: ${error.message}`)
+  } finally {
+    isBatchRunning.value = false
+    batchProgress.value = 0
+  }
+}
+
+// 保存批量运行结果到选中的文件夹（手动保存）- Excel 格式
+const saveBatchResultsToFolder = async () => {
+  if (batchResults.value.length === 0) {
+    alert('没有批量运行结果可保存，请先运行批量测试')
+    return
+  }
+  
+  try {
+    // 生成 Excel 内容
+    const workbook = generateBatchResultsExcel()
+    
+    // 生成文件名
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const filename = `batch_results_${timestamp}.xlsx`
+    
+    // 直接使用浏览器下载
+    const buffer = XLSX.write(workbook, { type: 'array', bookType: 'xlsx' })
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+    
+    return true
+    
+  } catch (error: any) {
+    console.error('保存批量运行结果失败:', error)
+    alert(`保存失败: ${error.message}`)
+    return false
+  }
+}
+
+// 生成批量运行结果的 Excel 文件（多个工作表）
+const generateBatchResultsExcel = (): XLSX.WorkBook => {
+  const workbook = XLSX.utils.book_new()
+  
+  // 1. 创建主数据表（每轮运行结果）
+  const mainSheetData = generateMainSheetData()
+  const mainSheet = XLSX.utils.aoa_to_sheet(mainSheetData)
+  mainSheet['!cols'] = mainSheetData[0].map(() => ({ wch: 25 }))
+  XLSX.utils.book_append_sheet(workbook, mainSheet, store.locales=='zh' ? '运行结果汇总' : 'Execution Results Summary')
+  
+  // 2. 创建统计信息表
+  const statsSheetData = generateStatsSheetData()
+  const statsSheet = XLSX.utils.aoa_to_sheet(statsSheetData)
+  statsSheet['!cols'] = [{ wch: 20 }, { wch: 30 }]
+  XLSX.utils.book_append_sheet(workbook, statsSheet, store.locales=='zh' ? '统计信息' : 'Statistics')
+  
+  // 3. 创建节点详情表
+  const detailsSheetData = generateDetailsSheetData()
+  const detailsSheet = XLSX.utils.aoa_to_sheet(detailsSheetData)
+  detailsSheet['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 50 }, { wch: 25 }]
+  XLSX.utils.book_append_sheet(workbook, detailsSheet, store.locales=='zh' ? '节点详情' : 'Node Details')
+  
+  return workbook
+}
+
+// 生成主数据表
+const generateMainSheetData = (): any[][] => {
+  // 收集所有轮次中出现的所有节点ID
+  const allNodeIds = new Set<number>()
+  const nodeNameMap = new Map<number, string>() // 存储节点名称（使用第一次出现的名称）
+  
+  batchResults.value.forEach(result => {
+    if (result.nodeResults) {
+      result.nodeResults.forEach((nodeResult: any) => {
+        allNodeIds.add(nodeResult.id)
+        // 如果还没有记录这个节点的名称，则记录
+        if (!nodeNameMap.has(nodeResult.id) && nodeResult.name) {
+          nodeNameMap.set(nodeResult.id, nodeResult.name)
+        }
+      })
+    }
+  })
+  
+  // 转换为排序后的数组
+  const executionOrder = Array.from(allNodeIds).sort((a, b) => a - b)
+  
+  // 构建表头
+  const headers = ['Round', 'Timestamp', 'Status', 'Duration(ms)']
+  executionOrder.forEach(nodeId => {
+    const nodeName = nodeNameMap.get(nodeId) || `Node${nodeId}`
+    headers.push(`${nodeName}(${nodeId})`)
+  })
+  
+  const rows: any[][] = [headers]
+  
+  // 为每一轮填充数据
+  batchResults.value.forEach(result => {
+    const row: any[] = []
+    
+    row.push(result.round)
+    row.push(result.timestamp)
+    row.push(result.success ? 'Success' : 'Failed')
+    row.push(result.duration || 0)
+    
+    // 构建当前轮次的节点结果映射
+    const nodeResultMap = new Map()
+    if (result.nodeResults) {
+      result.nodeResults.forEach((nodeResult: any) => {
+        nodeResultMap.set(nodeResult.id, nodeResult)
+      })
+    }
+    
+    // 按表头顺序填充数据
+    executionOrder.forEach(nodeId => {
+      const nodeResult = nodeResultMap.get(nodeId)
+      
+      if (nodeResult && nodeResult.result) {
+        let resultContent = ''
+        try {
+          if (typeof nodeResult.result === 'string') {
+            try {
+              const parsed = JSON.parse(nodeResult.result)
+              if (parsed && typeof parsed === 'object') {
+                if (parsed.result !== undefined) {
+                  resultContent = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result)
+                } else {
+                  resultContent = JSON.stringify(parsed)
+                }
+              } else {
+                resultContent = nodeResult.result
+              }
+            } catch {
+              resultContent = nodeResult.result
+            }
+          } else if (typeof nodeResult.result === 'object') {
+            if (nodeResult.result.result !== undefined) {
+              resultContent = typeof nodeResult.result.result === 'string' 
+                ? nodeResult.result.result 
+                : JSON.stringify(nodeResult.result.result)
+            } else {
+              resultContent = JSON.stringify(nodeResult.result)
+            }
+          } else {
+            resultContent = String(nodeResult.result)
+          }
+          if (resultContent.length > 32000) {
+            resultContent = resultContent.substring(0, 32000) + '...(truncated)'
+          }
+        } catch (e) {
+          resultContent = String(nodeResult.result).substring(0, 32000)
+        }
+        row.push(resultContent)
+      } else {
+        // 如果该轮次中没有这个节点，填充空字符串
+        row.push('')
+      }
+    })
+    
+    rows.push(row)
+  })
+  
+  return rows
+}
+
+// 生成统计信息表
+const generateStatsSheetData = (): any[][] => {
+  const successfulRuns = batchResults.value.filter(r => r.success).length
+  const failedRuns = batchResults.value.filter(r => !r.success).length
+  const totalDuration = batchResults.value.reduce((sum, r) => sum + (r.duration || 0), 0)
+  const averageDuration = batchResults.value.length > 0 ? totalDuration / batchResults.value.length : 0
+  const minDuration = batchResults.value.length > 0 ? Math.min(...batchResults.value.map(r => r.duration || 0)) : 0
+  const maxDuration = batchResults.value.length > 0 ? Math.max(...batchResults.value.map(r => r.duration || 0)) : 0
+  
+  const nodeStats = new Map<number, { name: string; success: number; total: number }>()
+  
+  batchResults.value.forEach(result => {
+    if (result.nodeResults) {
+      result.nodeResults.forEach((nodeResult: any) => {
+        if (!nodeStats.has(nodeResult.id)) {
+          nodeStats.set(nodeResult.id, {
+            name: nodeResult.name || `Node${nodeResult.id}`,
+            success: 0,
+            total: 0
+          })
+        }
+        const stats = nodeStats.get(nodeResult.id)!
+        stats.total++
+        if (nodeResult.status === 'success') {
+          stats.success++
+        }
+      })
+    }
+  })
+  
+  const rows: any[][] = [
+    ['Statistics', 'Value'],
+    ['Total Runs', batchResults.value.length],
+    ['Successful Runs', successfulRuns],
+    ['Failed Runs', failedRuns],
+    ['Success Rate', batchResults.value.length > 0 ? ((successfulRuns / batchResults.value.length) * 100).toFixed(2) + '%' : '0%'],
+    ['Total Duration (ms)', totalDuration],
+    ['Average Duration (ms)', averageDuration.toFixed(2)],
+    ['Min Duration (ms)', minDuration],
+    ['Max Duration (ms)', maxDuration],
+    ['Start Time', batchResults.value[0]?.startTime || ''],
+    ['End Time', batchResults.value[batchResults.value.length - 1]?.endTime || ''],
+    [],
+    ['Node Execution Statistics'],
+    ['Node Name', 'Node ID', 'Success Count', 'Total Count', 'Success Rate']
+  ]
+  
+  nodeStats.forEach((stats, nodeId) => {
+    const successRate = stats.total > 0 ? ((stats.success / stats.total) * 100).toFixed(2) + '%' : '0%'
+    rows.push([stats.name, nodeId, stats.success, stats.total, successRate])
+  })
+  
+  return rows
+}
+
+// 生成节点详情表
+const generateDetailsSheetData = (): any[][] => {
+  const rows: any[][] = [
+    ['Round', 'Node ID', 'Node Name', 'Node Type', 'Status', 'Result', 'Timestamp']
+  ]
+  
+  batchResults.value.forEach(result => {
+    if (result.nodeResults) {
+      result.nodeResults.forEach((nodeResult: any) => {
+        let resultContent = ''
+        try {
+          if (typeof nodeResult.result === 'string') {
+            try {
+              const parsed = JSON.parse(nodeResult.result)
+              if (parsed && typeof parsed === 'object') {
+                if (parsed.result !== undefined) {
+                  resultContent = typeof parsed.result === 'string' ? parsed.result : JSON.stringify(parsed.result)
+                } else {
+                  resultContent = JSON.stringify(parsed)
+                }
+              } else {
+                resultContent = nodeResult.result
+              }
+            } catch {
+              resultContent = nodeResult.result
+            }
+          } else if (typeof nodeResult.result === 'object') {
+            if (nodeResult.result.result !== undefined) {
+              resultContent = typeof nodeResult.result.result === 'string' 
+                ? nodeResult.result.result 
+                : JSON.stringify(nodeResult.result.result)
+            } else {
+              resultContent = JSON.stringify(nodeResult.result)
+            }
+          } else {
+            resultContent = String(nodeResult.result)
+          }
+          if (resultContent.length > 30000) {
+            resultContent = resultContent.substring(0, 30000) + '...(truncated)'
+          }
+        } catch (e) {
+          resultContent = String(nodeResult.result).substring(0, 30000)
+        }
+        
+        rows.push([
+          result.round,
+          nodeResult.id,
+          nodeResult.name,
+          nodeResult.type,
+          nodeResult.status,
+          resultContent,
+          nodeResult.timestamp || result.timestamp
+        ])
+      })
+    }
+  })
+  
+  return rows
+}
+
+// 清空批量运行结果
+const clearBatchResults = () => {
+  if (batchResults.value.length > 0) {
+    if (confirm('确定要清空批量运行结果吗？')) {
+      batchResults.value = []
+      batchProgress.value = 0
+    }
+  }
+}
+
+
+// 重置节点状态（用于批量运行）
+const resetNodeStatusesForBatch = () => {
+  items.value.forEach(item => {
+    item.status = 'idle'
+    // 清空结果 - 使用国际化文本
+    if (item.type !== 'start' && item.type !== 'end') {
+      const template = nodeTemplates[item.type]
+      if (template) {
+        // 根据节点类型设置对应的等待状态文本
+        const waitingTexts: Record<NodeType, string> = {
+          'text': t('waiting'),
+          'local': t('waiting'),
+          'web': t('waiting_search'),
+          'webpage': t('waiting_fetch'),
+          'reasoning': t('waiting_reasoning'),
+          'decision': t('waiting_decision'),
+          'python': t('waiting_execute'),
+          'knowledge': t('waiting_retrieval'),
+          'structured': t('waiting_structured'),
+          'mcp': t('waiting'),
+          'start': t('waiting_start'),
+          'end': t('waiting_end')
+        }
+        item.result = waitingTexts[item.type] || t('waiting')
+      }
+    }
+    if (item.type === 'start') {
+      item.result = t('waiting_start')
+    }
+    if (item.type === 'end') {
+      item.result = t('waiting_end')
+    }
+  })
+}
+
+// 重置工作流到原始状态
+const resetWorkflowToOriginal = (originalItems: any[], originalLinks: any[]) => {
+  // 重置节点数据
+  items.value = JSON.parse(JSON.stringify(originalItems))
+  links.value = JSON.parse(JSON.stringify(originalLinks))
+  
+  // 重置节点状态 - 使用国际化文本
+  items.value.forEach(item => {
+    item.status = 'idle'
+    const waitingTexts: Record<NodeType, string> = {
+      'text': t('waiting'),
+      'local': t('waiting'),
+      'web': t('waiting_search'),
+      'webpage': t('waiting_fetch'),
+      'reasoning': t('waiting_reasoning'),
+      'decision': t('waiting_decision'),
+      'python': t('waiting_execute'),
+      'knowledge': t('waiting_retrieval'),
+      'structured': t('waiting_structured'),
+      'mcp': t('waiting'),
+      'start': t('waiting_start'),
+      'end': t('waiting_end')
+    }
+    if (item.type !== 'start' && item.type !== 'end') {
+      item.result = waitingTexts[item.type] || t('waiting')
+    }
+    if (item.type === 'start') {
+      item.result = t('waiting_start')
+    }
+    if (item.type === 'end') {
+      item.result = t('waiting_end')
+    }
+  })
+}
+
+// 收集所有节点的执行结果
+const collectNodeResults = () => {
+  const nodeResults: any[] = []
+  
+  // 获取执行顺序
+  const executionOrder = runner.value?.executionOrder || []
+  
+  // 按照执行顺序收集结果
+  for (const nodeId of executionOrder) {
+    const node = items.value.find(n => n.id === nodeId)
+    if (node) {
+      nodeResults.push({
+        id: node.id,
+        name: node.name,
+        type: node.type,
+        status: node.status,
+        result: parseNodeResult(node.result),
+        timestamp: new Date().toISOString()
+      })
+    }
+  }
+  
+  // 添加未在执行顺序中的节点（如果有）
+  items.value.forEach(node => {
+    if (!executionOrder.includes(node.id)) {
+      nodeResults.push({
+        id: node.id,
+        name: node.name,
+        type: node.type,
+        status: node.status,
+        result: parseNodeResult(node.result),
+        timestamp: new Date().toISOString(),
+        skipped: true
+      })
+    }
+  })
+  
+  return nodeResults
+}
+
+// 解析节点结果
+const parseNodeResult = (result: string): any => {
+  if (!result) return null
+  
+  try {
+    return JSON.parse(result)
+  } catch {
+    return result
+  }
+}
+
 
 // 工作流运行器实例
 const runner = ref<WorkflowRunner | null>(null)
@@ -2480,6 +2990,14 @@ const getNodeIconColor = (node: NodeData | null | undefined): string => {
   return colors[node.type] || '#757575'
 }
 
+const getFileName = (filePath: string): string => {
+  if (!filePath) return ''
+  
+  // 提取文件名（支持Windows和Unix路径）
+  const fileName = filePath.split(/[\\/]/).pop() || filePath
+  return fileName
+}
+
 // 获取节点显示配置 - 添加本地节点处理模式显示
 const getNodeDisplayConfig = (node: NodeData): string => {
   if (!node.result) return t('no_execute')
@@ -2490,12 +3008,14 @@ const getNodeDisplayConfig = (node: NodeData): string => {
       if (node.type === 'local') {
         if (parsed.success) {
           const mode = parsed.mode || 'full'
+          const fileName = getFileName(parsed.filePath || node.prompt || '')
+          
           if (mode === 'full') {
-            return `${t('full_file_mode')} | ${parsed.filename || '文件'}`
+            return `${t('full_file_mode')} | ${truncateText(fileName || '文件', 15)}`
           } else if (mode === 'template') {
             const slices = parsed.slices || {}
             const sliceCount = Object.keys(slices).length
-            return `${t('template_mode')} | ${sliceCount}个切片`
+            return `${t('template_mode')} | ${truncateText(fileName || '文件', 15)} | ${sliceCount}个切片`
           }
         }
       }
@@ -3274,7 +3794,8 @@ const addDecisionBranch = (): void => {
   const newBranch = {
     id: newBranchId,
     name: `${t('branch')} ${branchCount + 1}`,
-    description: ''
+    description: '',
+    dataTemplate: '{input}'
   }
   
   // 添加到分支数组
@@ -5772,6 +6293,22 @@ const getModelListForType = (modelType: string | undefined): string[] => {
   }
 }
 
+// 重置所有节点状态（不清除位置和连接）
+const resetNodeStatuses = (): void => {
+  if (items.value.length === 0) {
+    return
+  }
+  
+  // 确认提示
+  if (!confirm(t('reset_status_confirm'))) {
+    return
+  }
+  runner.value?.resetNodes()
+  // 保存到本地存储
+  saveToLocalStorage()
+  
+  console.log('所有节点状态已重置')
+}
 onMounted(async (): Promise<void> => {
   loadFromLocalStorage()
   
@@ -5975,12 +6512,10 @@ onBeforeUnmount((): void => {
 
 .canvas-status {
   position: absolute;
-  top: 10px;
-  right: 10px;
-  background-color: rgba(0, 0, 0, 0.8);
+  top: 5px;
+  right: 5px;
   color: white;
-  padding: 6px 12px;
-  border-radius: 4px;
+  padding: 0px;
   font-size: 11px;
   z-index: 100;
 }
@@ -6044,14 +6579,6 @@ onBeforeUnmount((): void => {
 
 .connector:hover circle {
   fill: var(--fontActiveColor) !important;
-}
-
-.connector.side {
-  opacity: 0.7;
-}
-
-.connector.side:hover {
-  opacity: 1;
 }
 
 .connector.start-prompt circle,
@@ -6223,6 +6750,7 @@ input{
 select{
   margin: 5px 0px;
   width:100%;
+  background-color: var(--backgroundColor);
 }
 .code-textarea {
   min-height: 120px;
@@ -6319,11 +6847,6 @@ select{
   gap: 6px;
 }
 
-.upstream-table-container {
-  max-height: 150px;
-  overflow-y: auto;
-}
-
 .upstream-table {
   width: 100%;
   border-collapse: collapse;
@@ -6412,12 +6935,6 @@ select{
   height: auto;
 }
 
-.columns-table-container,
-.data-table-container,
-.branches-table-container{
-  overflow-y: auto;
-}
-
 .columns-table th,
 .columns-table td,
 .data-table th,
@@ -6425,9 +6942,7 @@ select{
 .branches-table th,
 .branches-table td,
 .templates-table th,
-.templates-table td,
-.ports-table th,
-.ports-table td {
+.templates-table td {
   border: 1px solid var(--borderColor);
 }
 
@@ -6435,8 +6950,7 @@ select{
 .columns-table select,
 .data-table input,
 .branches-table input,
-.templates-table input,
-.ports-table input {
+.templates-table input {
   margin: 0;
   background-color: var(--backgroundColor);
   color: var(--fontColor);
@@ -6448,8 +6962,7 @@ select{
 .columns-table select:focus,
 .data-table input:focus,
 .branches-table input:focus,
-.templates-table input:focus,
-.ports-table input:focus {
+.templates-table input:focus {
   outline: 1px solid var(--fontActiveColor);
 }
 

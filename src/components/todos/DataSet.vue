@@ -5,62 +5,28 @@
         <div class="settings-title">
           设置
         </div>
-        <!-- 数据导出 -->
+        
+        <!-- 工作区路径 -->
         <div class="settings-item">
           <div class="settings-item-content">
             <div class="settings-item-title">
-              <i class="fa fa-download"></i> 导出
+              <i class="fa fa-folder"></i> 当前工作区
+            </div>
+            <div class="workspace-path-display" :title="workspacePath">
+              {{ workspacePath || '未选择工作区' }}
             </div>
           </div>
-          <button class="settings-action-btn" @click="exportData" title="导出数据">
-            <i class="fa fa-download"></i> 导出
+          <button class="settings-action-btn" @click="selectWorkspace" title="选择工作区">
+            <i class="fa fa-folder-open"></i> 选择
           </button>
         </div>
         
-        <!-- 数据导入 -->
+        <!-- 项目统计 -->
         <div class="settings-item">
           <div class="settings-item-content">
             <div class="settings-item-title">
-              <i class="fa fa-upload"></i> 导入
+              <i class="fa fa-bar-chart"></i> 项目统计
             </div>
-          </div>
-          <div class="settings-import-actions">
-            <input 
-              type="file" 
-              ref="fileInput"
-              accept=".json" 
-              @change="handleFileSelect"
-              class="file-input"
-              id="fileInput"
-            />
-            <label for="fileInput" class="settings-action-btn" title="选择文件">
-              <i class="fa fa-folder-open"></i>
-            </label>
-            <button 
-              class="settings-action-btn" 
-              @click="importData" 
-              :disabled="!selectedFile"
-              title="导入数据"
-            >
-              <i class="fa fa-upload"></i> 导入
-            </button>
-          </div>
-        </div>
-        
-        <!-- 清空数据 -->
-        <div class="settings-item danger">
-          <div class="settings-item-content">
-            <div class="settings-item-title">
-              <i class="fa fa-trash"></i> 清空
-            </div>
-          </div>
-          <button class="settings-action-btn danger" @click="confirmClearData" title="清空所有数据">
-            <i class="fa fa-trash"></i> 清空
-          </button>
-        </div>
-        
-        <div class="settings-item info">
-          <div class="settings-item-content">
             <div class="settings-stats">
               <div class="stat-item">
                 <span class="stat-label">灵感:</span>
@@ -82,10 +48,68 @@
                 <span class="stat-label">已完成:</span>
                 <span class="stat-value">{{ stats.completed }}</span>
               </div>
-              <div class="stat-item total">
-                <span class="stat-label">总计:</span>
-                <span class="stat-value">{{ stats.total }}</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 文件夹统计 -->
+        <div class="settings-item">
+          <div class="settings-item-content">
+            <div class="settings-item-title">
+              <i class="fa fa-folder"></i> 文件系统统计
+            </div>
+            <div class="folder-stats">
+              <div class="stat-item">
+                <span class="stat-label">总文件夹:</span>
+                <span class="stat-value">{{ stats.totalFolders }}</span>
               </div>
+              <div class="stat-item">
+                <span class="stat-label">总文件:</span>
+                <span class="stat-value">{{ stats.totalFiles }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Markdown文件:</span>
+                <span class="stat-value">{{ stats.totalMarkdownFiles }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">.README.md文件:</span>
+                <span class="stat-value">{{ stats.totalReadmeFiles }}</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">其他文件:</span>
+                <span class="stat-value">{{ stats.totalOtherFiles }}</span>
+              </div>
+              <div class="stat-item total">
+                <span class="stat-label">总条目:</span>
+                <span class="stat-value">{{ stats.totalItems }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 刷新统计 -->
+        <div class="settings-item">
+          <div class="settings-item-content">
+            <div class="settings-item-title">
+              <i class="fa fa-refresh"></i> 刷新统计
+            </div>
+          </div>
+          <button class="settings-action-btn" @click="refreshStats" title="刷新统计">
+            <i class="fa fa-refresh"></i> 刷新
+          </button>
+        </div>
+
+        <!-- 调试信息（仅在开发环境显示） -->
+        <div class="settings-item" v-if="debug">
+          <div class="settings-item-content">
+            <div class="settings-item-title">
+              <i class="fa fa-bug"></i> 调试信息
+            </div>
+            <div style="font-size: 11px; max-height: 100px; overflow-y: auto; padding: 4px; background: var(--menuColor); border-radius: 4px;">
+              <div>文件列表总数: {{ fileList.length }}</div>
+              <div>Markdown文件: {{ fileList.filter(f => f.extension === '.md').length }}</div>
+              <div>文件夹总数: {{ fileList.filter(f => f.type === 'folder').length }}</div>
+              <div>带状态的文件夹: {{ fileList.filter(f => f.type === 'folder' && f.attributes?.status).length }}</div>
             </div>
           </div>
         </div>
@@ -116,12 +140,12 @@
 
 <style scoped>
 .data-set-container {
+  width: 100%;
   display: flex;
   flex-direction: column;
   height: 100%;
   overflow: hidden;
   background: var(--backgroundColor);
-  border-left: var(--borderColor) 1px solid;
 }
 
 .settings-scroll {
@@ -131,27 +155,25 @@
 }
 
 .settings-group {
-  margin-bottom: 15px;
   border: 1px solid var(--borderColor);
   border-radius: 5px;
   overflow: hidden;
 }
 
 .settings-title {
-  padding: 8px 10px;
+  padding: 2px 5px;
   background: var(--menuColor);
   color: var(--fontColor);
   font-weight: 500;
   border-bottom: 1px solid var(--borderColor);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
 }
 
 .settings-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   padding: 5px;
   border-bottom: 1px solid var(--borderColor);
   background: var(--backgroundColor);
@@ -165,48 +187,51 @@
   background: var(--menuActiveColor);
 }
 
-.settings-item.danger {
-  border-left: 3px solid #ff6b6b;
-}
-
-.settings-item.info {
-  border-left: 3px solid #4ECDC4;
-}
-
 .settings-item-content {
-  flex: 1;
+  width: 100%;
+  margin-bottom: 10px;
 }
 
 .settings-item-title {
   font-weight: 500;
   color: var(--fontColor);
-  margin: 4px 0px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  margin-bottom: 5px;
 }
 
-.settings-item-description {
+.workspace-path-display {
   font-size: 12px;
   color: var(--fontColor);
-  opacity: 0.7;
+  opacity: 0.8;
+  word-break: break-all;
+  padding: 4px;
+  background: var(--menuColor);
+  border-radius: 4px;
+  max-height: 60px;
+  overflow-y: auto;
 }
 
 .settings-action-btn {
-  padding: 4px;
+  padding: 6px 12px;
   border: 1px solid var(--borderColor);
   border-radius: 4px;
   background: var(--backgroundColor);
   color: var(--fontColor);
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   font-size: 13px;
   white-space: nowrap;
+  width: 100%;
 }
+
 .settings-action-btn:hover {
   background: var(--menuActiveColor);
+  border-color: var(--fontActiveColor);
 }
 
 .settings-action-btn:disabled {
@@ -214,31 +239,18 @@
   cursor: not-allowed;
 }
 
-.settings-action-btn.danger {
-  background: #ff6b6b;
-  color: white;
-  border-color: #ff6b6b;
-}
-
-.settings-action-btn.danger:hover {
-  background: #ff5252;
-}
-
-.settings-import-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.file-input {
-  display: none;
-}
-
 .settings-stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 8px;
+  grid-template-columns: repeat(1, 1fr);
+  gap: 5px;
+  margin-top: 5px;
+}
+
+.folder-stats {
+  display: grid;
+  grid-template-columns: repeat(1, 1fr);
+  gap: 5px;
+  margin-top: 5px;
 }
 
 .stat-item {
@@ -250,7 +262,7 @@
 }
 
 .stat-item.total {
-  grid-column: span 3;
+  grid-column: span 1;
   border-top: 1px solid var(--borderColor);
   padding-top: 6px;
   margin-top: 2px;
@@ -282,7 +294,7 @@
 .confirm-dialog {
   background: var(--backgroundColor);
   border-radius: 8px;
-  padding: 10px;
+  padding: 20px;
   width: 300px;
   max-width: 90%;
   border: 1px solid var(--borderColor);
@@ -293,15 +305,19 @@
   color: var(--fontColor);
   font-weight: 500;
   font-size: 16px;
-  margin-bottom: 5px;
+  margin-bottom: 15px;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
+.confirm-dialog-header i {
+  color: #ff6b6b;
+}
+
 .confirm-dialog-content {
   color: var(--fontColor);
-  margin-bottom: 10px;
+  margin-bottom: 20px;
   line-height: 1.5;
 }
 
@@ -312,7 +328,7 @@
 }
 
 .confirm-btn {
-  padding: 4px 8px;
+  padding: 8px 16px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
@@ -340,116 +356,139 @@
 </style>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 
 // 定义事件
-const emit = defineEmits(['data-imported', 'data-cleared']);
+const emit = defineEmits(['data-imported', 'data-cleared', 'workspace-changed']);
 
-const selectedFile = ref<File | null>(null);
+// 响应式变量
+const workspacePath = ref<string>('');
+const fileList = ref<any[]>([]);
 const showConfirmDialog = ref(false);
 const confirmMessage = ref('');
-const confirmAction = ref<'clear' | 'import' | null>(null);
-const confirmData = ref<any>(null);
-const fileInput = ref<HTMLInputElement | null>(null);
+const confirmAction = ref<'clear' | null>(null);
+const debug = ref(false); // 设置为true显示调试信息
 
 // 计算数据统计
 const stats = computed(() => {
-  const itemsStr = localStorage.getItem('items');
-  const items = itemsStr ? JSON.parse(itemsStr) : [];
+  const allFiles = fileList.value;
+  
+  // 统计所有文件夹
+  const actualFolders = allFiles.filter(item => item.type === 'folder');
+  
+  // 统计所有文件（包括非.md文件）
+  const allFiles_count = allFiles.filter(item => item.type === 'file');
+  
+  // 统计Markdown文件
+  const markdownFiles = allFiles.filter(item => 
+    item.type === 'file' && item.extension === '.md'
+  );
+  
+  // 统计.README.md文件
+  const readmeFiles = markdownFiles.filter(item => 
+    item.label === '.README.md'
+  );
+  
+  // 统计其他文件（非.md文件）
+  const otherFiles = allFiles.filter(item => 
+    item.type === 'file' && item.extension !== '.md'
+  );
+  
+  // 统计带状态的文件夹
+  const projectFolders = actualFolders.filter(f => 
+    f.attributes && f.attributes.status
+  );
+  
+  // 统计所有项目（有status的文件夹 + 所有.md文件）
+  const projectItems = [
+    ...projectFolders,
+    ...markdownFiles
+  ];
+  
+  // 按状态统计项目
+  const inspiration = projectItems.filter(item => 
+    (item.attributes?.status || '灵感') === '灵感'
+  ).length;
+  
+  const organized = projectItems.filter(item => 
+    item.attributes?.status === '规划'
+  ).length;
+  
+  const pending = projectItems.filter(item => 
+    item.attributes?.status === '待办'
+  ).length;
+  
+  const inProgress = projectItems.filter(item => 
+    item.attributes?.status === '进行中'
+  ).length;
+  
+  const completed = projectItems.filter(item => 
+    item.attributes?.status === '已完成'
+  ).length;
   
   return {
-    inspiration: items.filter((item: any) => item.status === '灵感').length,
-    organized: items.filter((item: any) => item.status === '规划').length,
-    pending: items.filter((item: any) => item.status === '待办').length,
-    inProgress: items.filter((item: any) => item.status === '进行中').length,
-    completed: items.filter((item: any) => item.status === '已完成').length,
-    total: items.length
+    inspiration,
+    organized,
+    pending,
+    inProgress,
+    completed,
+    // 文件系统统计
+    totalFolders: actualFolders.length,           // 所有文件夹
+    totalFiles: allFiles_count.length,             // 所有文件
+    totalMarkdownFiles: markdownFiles.length,      // 所有.md文件
+    totalReadmeFiles: readmeFiles.length,          // .README.md文件
+    totalOtherFiles: otherFiles.length,            // 其他文件
+    projectFolders: projectFolders.length,         // 项目文件夹（有status）
+    totalItems: allFiles.length,                   // 总条目数
+    totalProjects: projectItems.length             // 项目总数
   };
 });
 
-// 导出数据
-const exportData = () => {
+// 选择工作区
+const selectWorkspace = async () => {
   try {
-    // 获取所有数据
-    const items = localStorage.getItem('items');
-    const nextId = localStorage.getItem('nextId');
-    
-    const exportData = {
-      items: items ? JSON.parse(items) : [],
-      nextId: nextId ? parseInt(nextId) : 1,
-      exportDate: new Date().toISOString(),
-      version: '1.0'
-    };
-    
-    // 创建JSON字符串
-    const dataStr = JSON.stringify(exportData, null, 2);
-    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-    
-    // 创建下载链接
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `task-manager-data-${new Date().toISOString().split('T')[0]}.json`;
-    
-    // 触发下载
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    // 清理URL
-    setTimeout(() => URL.revokeObjectURL(url), 100);
-    
-    console.log('数据导出成功');
+    const folderPath = await window.ipcRenderer.invoke('openFolderDialog');
+    if (folderPath) {
+      workspacePath.value = folderPath;
+      await loadWorkspaceStats();
+      emit('workspace-changed', folderPath);
+      emit('data-imported', { path: folderPath });
+    }
   } catch (error) {
-    console.error('导出数据失败:', error);
-    alert('导出数据失败，请重试');
+    console.error('选择工作区失败:', error);
+    alert('选择工作区失败，请重试');
   }
 };
 
-// 处理文件选择
-const handleFileSelect = (event: Event) => {
-  const target = event.target as HTMLInputElement;
-  if (target.files && target.files.length > 0) {
-    selectedFile.value = target.files[0];
+// 加载工作区统计
+const loadWorkspaceStats = async () => {
+  if (!workspacePath.value) return;
+  
+  try {
+    console.log('加载工作区统计:', workspacePath.value);
+    // 获取文件列表（深度为3层）
+    const files = await window.ipcRenderer.invoke('getFiles', workspacePath.value, 3);
+    console.log('获取到的文件列表:', files);
+    fileList.value = files || [];
+    
+    // 打印详细统计信息
+    const folders = files.filter((f: any) => f.type === 'folder');
+    const markdownFiles = files.filter((f: any) => f.extension === '.md');
+    
+  } catch (error) {
+    console.error('加载工作区统计失败:', error);
   }
 };
 
-// 导入数据
-const importData = () => {
-  if (!selectedFile.value) {
-    alert('请先选择要导入的文件');
+// 刷新统计
+const refreshStats = async () => {
+  if (!workspacePath.value) {
+    alert('请先选择工作区');
     return;
   }
   
-  const reader = new FileReader();
-  
-  reader.onload = (e) => {
-    try {
-      const content = e.target?.result as string;
-      const importData = JSON.parse(content);
-      
-      // 验证数据格式
-      if (!importData.items || !Array.isArray(importData.items)) {
-        throw new Error('无效的数据格式');
-      }
-      
-      // 显示确认对话框
-      confirmMessage.value = `确认导入 ${importData.items.length} 条数据吗？这将替换现有数据。`;
-      confirmAction.value = 'import';
-      confirmData.value = importData;
-      showConfirmDialog.value = true;
-      
-    } catch (error) {
-      console.error('导入数据失败:', error);
-      alert('导入数据失败：文件格式不正确');
-    }
-  };
-  
-  reader.onerror = () => {
-    alert('读取文件失败');
-  };
-  
-  reader.readAsText(selectedFile.value);
+  await loadWorkspaceStats();
+  alert('统计已刷新');
 };
 
 // 确认清空数据
@@ -463,48 +502,48 @@ const confirmClearData = () => {
 const cancelConfirm = () => {
   showConfirmDialog.value = false;
   confirmAction.value = null;
-  confirmData.value = null;
 };
 
 // 执行确认的操作
-const executeConfirmAction = () => {
+const executeConfirmAction = async () => {
   try {
     switch (confirmAction.value) {
       case 'clear':
         // 清空数据
-        localStorage.removeItem('items');
-        localStorage.removeItem('nextId');
+        localStorage.removeItem('workspacePath');
+        workspacePath.value = '';
+        fileList.value = [];
         emit('data-cleared');
         alert('数据已清空');
         break;
-        
-      case 'import':
-        // 导入数据
-        if (confirmData.value) {
-          localStorage.setItem('items', JSON.stringify(confirmData.value.items));
-          localStorage.setItem('nextId', confirmData.value.nextId?.toString() || '1');
-          emit('data-imported', confirmData.value);
-          alert(`成功导入 ${confirmData.value.items.length} 条数据`);
-        }
-        break;
     }
-    
-    // 重置文件输入
-    if (fileInput.value) fileInput.value.value = '';
-    selectedFile.value = null;
-    
   } catch (error) {
     console.error('操作失败:', error);
     alert('操作失败，请重试');
   } finally {
     showConfirmDialog.value = false;
     confirmAction.value = null;
-    confirmData.value = null;
   }
 };
 
+// 监听工作区路径变化
+watch(workspacePath, (newPath) => {
+  if (newPath) {
+    localStorage.setItem('workspacePath', newPath);
+  } else {
+    localStorage.removeItem('workspacePath');
+  }
+});
+
 // 初始化
-onMounted(() => {
+onMounted(async () => {
   console.log('DataSet组件已加载');
+  
+  // 读取保存的工作区路径
+  const savedPath = localStorage.getItem('workspacePath');
+  if (savedPath) {
+    workspacePath.value = savedPath;
+    await loadWorkspaceStats();
+  }
 });
 </script>

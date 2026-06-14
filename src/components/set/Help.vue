@@ -1,6 +1,6 @@
 <template>
   <div class="help-container">
-    <!-- 左侧导航 - 默认窄版 -->
+    <!-- 左侧浮动导航 - 在容器内部 -->
     <div 
       class="help-nav"
       :class="{ expanded: navExpanded }"
@@ -11,7 +11,7 @@
         <div class="nav-icon">
           <i class="fa fa-question-circle"></i>
         </div>
-        <div class="nav-title" v-show="navExpanded">AI-KM 帮助</div>
+        <div class="nav-title" v-show="navExpanded">{{ t('nav.title') }}</div>
       </div>
       
       <div class="nav-content">
@@ -24,8 +24,8 @@
         >
           <div class="nav-item-icon">{{ section.icon }}</div>
           <div class="nav-item-content" v-show="navExpanded">
-            <div class="nav-item-title">{{ section.title }}</div>
-            <div class="nav-item-subtitle">{{ section.subtitle }}</div>
+            <div class="nav-item-title">{{ t(`sections.${section.id}.title`) }}</div>
+            <div class="nav-item-subtitle">{{ t(`sections.${section.id}.subtitle`) }}</div>
           </div>
         </div>
       </div>
@@ -42,18 +42,18 @@
     <div class="help-main">
       <!-- 紧凑的头部 -->
       <div class="main-header">
-        <h1>AI-KM 智能生产力平台</h1>
-        <p class="header-subtitle">新手友好指南 - 四大核心功能</p>
+        <h1>{{ t('header.title') }}</h1>
+        <p class="header-subtitle">{{ t('header.subtitle') }}</p>
       </div>
 
       <div class="main-content">
-        <!-- 快速上手指南 - 最前面 -->
+        <!-- 快速上手指南 -->
         <section id="quick-start" class="help-section">
           <div class="section-header">
             <div class="section-icon">🚀</div>
             <div class="section-title-content">
-              <h2>快速上手指南（5分钟）</h2>
-              <p class="section-desc">立即体验核心功能</p>
+              <h2>{{ t('sections.quick-start.title') }}</h2>
+              <p class="section-desc">{{ t('sections.quick-start.subtitle') }}</p>
             </div>
           </div>
 
@@ -62,11 +62,9 @@
               <div class="quick-step">
                 <div class="step-icon">1️⃣</div>
                 <div class="step-content">
-                  <h4>体验智能对话</h4>
+                  <h4>{{ t('quickStart.step1.title') }}</h4>
                   <ul>
-                    <li>点击左侧AI图标</li>
-                    <li>问个问题如"你好"</li>
-                    <li>感受AI的回答</li>
+                    <li v-for="(item, index) in t('quickStart.step1.items')" :key="index">{{ item }}</li>
                   </ul>
                 </div>
               </div>
@@ -74,11 +72,9 @@
               <div class="quick-step">
                 <div class="step-icon">2️⃣</div>
                 <div class="step-content">
-                  <h4>记录灵感</h4>
+                  <h4>{{ t('quickStart.step2.title') }}</h4>
                   <ul>
-                    <li>点击顶部"+"号</li>
-                    <li>输入想法</li>
-                    <li>点击保存</li>
+                    <li v-for="(item, index) in t('quickStart.step2.items')" :key="index">{{ item }}</li>
                   </ul>
                 </div>
               </div>
@@ -88,11 +84,9 @@
               <div class="quick-step">
                 <div class="step-icon">3️⃣</div>
                 <div class="step-content">
-                  <h4>创建任务</h4>
+                  <h4>{{ t('quickStart.step3.title') }}</h4>
                   <ul>
-                    <li>进入任务管理</li>
-                    <li>点击"新建任务"</li>
-                    <li>设置时间开始</li>
+                    <li v-for="(item, index) in t('quickStart.step3.items')" :key="index">{{ item }}</li>
                   </ul>
                 </div>
               </div>
@@ -100,11 +94,9 @@
               <div class="quick-step">
                 <div class="step-icon">4️⃣</div>
                 <div class="step-content">
-                  <h4>知识库体验</h4>
+                  <h4>{{ t('quickStart.step4.title') }}</h4>
                   <ul>
-                    <li>导入一个文档</li>
-                    <li>点击"处理"按钮</li>
-                    <li>问AI相关问题</li>
+                    <li v-for="(item, index) in t('quickStart.step4.items')" :key="index">{{ item }}</li>
                   </ul>
                 </div>
               </div>
@@ -117,34 +109,32 @@
           <div class="section-header">
             <div class="section-icon">🤖</div>
             <div class="section-title-content">
-              <h2>智能对话系统</h2>
-              <p class="section-desc">你的AI助手，参考个人文档库回答问题</p>
+              <h2>{{ t('sections.ai-chat.title') }}</h2>
+              <p class="section-desc">{{ t('sections.ai-chat.subtitle') }}</p>
             </div>
           </div>
 
           <div class="section-content">
             <div class="content-card">
-              <h3>核心概念：RAG技术</h3>
-              <p>AI不仅能回答问题，还能<strong>参考你的个人文档库</strong>来回答问题。</p>
+              <h3>{{ t('aiChat.concept.title') }}</h3>
+              <p v-html="t('aiChat.concept.description')"></p>
               
               <div class="example-box">
-                <div class="example-title">📌 使用场景：</div>
-                <p>询问："我的项目报告里提到的时间节点是什么？"</p>
-                <p>AI会自动从你上传的项目文档中查找相关信息，然后回答。</p>
+                <div class="example-title">{{ t('aiChat.concept.example.title') }}</div>
+                <p>{{ t('aiChat.concept.example.question') }}</p>
+                <p>{{ t('aiChat.concept.example.answer') }}</p>
               </div>
             </div>
 
             <div class="content-card">
-              <h3>三步使用指南</h3>
+              <h3>{{ t('aiChat.guide.title') }}</h3>
               
               <div class="step-card">
                 <div class="step-number">1</div>
                 <div class="step-details">
-                  <h4>安装Ollama（推荐）</h4>
+                  <h4>{{ t('aiChat.guide.step1.title') }}</h4>
                   <ul>
-                    <li>访问 <a href="https://ollama.com/" target="_blank">ollama.com</a></li>
-                    <li>运行 <code>ollama serve</code></li>
-                    <li>运行 <code>ollama pull qwen3</code></li>
+                    <li v-for="(item, index) in t('aiChat.guide.step1.items')" :key="index" v-html="item"></li>
                   </ul>
                 </div>
               </div>
@@ -152,11 +142,9 @@
               <div class="step-card">
                 <div class="step-number">2</div>
                 <div class="step-details">
-                  <h4>创建聊天对话</h4>
+                  <h4>{{ t('aiChat.guide.step2.title') }}</h4>
                   <ul>
-                    <li>点击"新建聊天"</li>
-                    <li>选择模型（如qwen3）</li>
-                    <li>开始对话，像微信一样简单</li>
+                    <li v-for="(item, index) in t('aiChat.guide.step2.items')" :key="index">{{ item }}</li>
                   </ul>
                 </div>
               </div>
@@ -164,11 +152,9 @@
               <div class="step-card">
                 <div class="step-number">3</div>
                 <div class="step-details">
-                  <h4>关联知识库</h4>
+                  <h4>{{ t('aiChat.guide.step3.title') }}</h4>
                   <ul>
-                    <li>点击书本图标 📚</li>
-                    <li>选择.kb格式知识库</li>
-                    <li>AI回答时会自动从知识库找资料</li>
+                    <li v-for="(item, index) in t('aiChat.guide.step3.items')" :key="index">{{ item }}</li>
                   </ul>
                 </div>
               </div>
@@ -181,73 +167,67 @@
           <div class="section-header">
             <div class="section-icon">📚</div>
             <div class="section-title-content">
-              <h2>知识管理</h2>
-              <p class="section-desc">建立你的数字大脑</p>
+              <h2>{{ t('sections.knowledge.title') }}</h2>
+              <p class="section-desc">{{ t('sections.knowledge.subtitle') }}</p>
             </div>
           </div>
 
           <div class="section-content">
             <div class="content-card">
-              <h3>知识处理流程</h3>
+              <h3>{{ t('knowledge.process.title') }}</h3>
               <div class="flow-diagram">
                 <div class="flow-step">
                   <div class="flow-icon">📥</div>
-                  <div class="flow-text">导入文档</div>
+                  <div class="flow-text">{{ t('knowledge.process.step1') }}</div>
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step">
                   <div class="flow-icon">✂️</div>
-                  <div class="flow-text">知识切片</div>
+                  <div class="flow-text">{{ t('knowledge.process.step2') }}</div>
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step">
                   <div class="flow-icon">🔢</div>
-                  <div class="flow-text">向量化</div>
+                  <div class="flow-text">{{ t('knowledge.process.step3') }}</div>
                 </div>
                 <div class="flow-arrow">→</div>
                 <div class="flow-step">
                   <div class="flow-icon">🔍</div>
-                  <div class="flow-text">智能检索</div>
+                  <div class="flow-text">{{ t('knowledge.process.step4') }}</div>
                 </div>
               </div>
             </div>
 
             <div class="content-card">
-              <h3>操作步骤</h3>
+              <h3>{{ t('knowledge.steps.title') }}</h3>
               
-              <div class="step-guide">
-                <div class="guide-step">
-                  <span class="guide-number">1</span>
-                  <div class="guide-content">
-                    <strong>导入文档</strong>
-                    <p>支持：Markdown、PDF、Word、TXT</p>
-                    <div class="tool-tip">
-                      💡 建议先用 <a href="https://mineru.com.cn/" target="_blank">MinerU</a> 转换格式
-                    </div>
-                  </div>
+              <div class="guide-step">
+                <span class="guide-number">1</span>
+                <div class="guide-content">
+                  <strong>{{ t('knowledge.steps.step1.title') }}</strong>
+                  <p>{{ t('knowledge.steps.step1.description') }}</p>
+                  <div class="tool-tip" v-html="t('knowledge.steps.step1.tip')"></div>
                 </div>
+              </div>
 
-                <div class="guide-step">
-                  <span class="guide-number">2</span>
-                  <div class="guide-content">
-                    <strong>创建知识库</strong>
-                    <ul>
-                      <li>点击"知识管理"菜单</li>
-                      <li>选择文件夹</li>
-                      <li>点击"处理"按钮</li>
-                    </ul>
-                  </div>
+              <div class="guide-step">
+                <span class="guide-number">2</span>
+                <div class="guide-content">
+                  <strong>{{ t('knowledge.steps.step2.title') }}</strong>
+                  <ul>
+                    <li v-for="(item, index) in t('knowledge.steps.step2.items')" :key="index">{{ item }}</li>
+                  </ul>
                 </div>
+              </div>
 
-                <div class="guide-step">
-                  <span class="guide-number">3</span>
-                  <div class="guide-content">
-                    <strong>使用知识库</strong>
-                    <div class="use-cases">
-                      <span class="use-case">💬 智能对话</span>
-                      <span class="use-case">🔗 工作流</span>
-                      <span class="use-case">🔍 独立检索</span>
-                    </div>
+              <div class="guide-step">
+                <span class="guide-number">3</span>
+                <div class="guide-content">
+                  <strong>{{ t('knowledge.steps.step3.title') }}</strong>
+                  <div class="use-cases">
+                    <span v-for="(useCase, index) in t('knowledge.steps.step3.useCases')" 
+                          :key="index" 
+                          class="use-case">{{ useCase }}</span>
                   </div>
                 </div>
               </div>
@@ -260,38 +240,38 @@
           <div class="section-header">
             <div class="section-icon">🔗</div>
             <div class="section-title-content">
-              <h2>可视化工作流</h2>
-              <p class="section-desc">零代码自动化，像搭积木一样</p>
+              <h2>{{ t('sections.workflow.title') }}</h2>
+              <p class="section-desc">{{ t('sections.workflow.subtitle') }}</p>
             </div>
           </div>
 
           <div class="section-content">
             <div class="content-card">
-              <h3>八大节点类型</h3>
+              <h3>{{ t('workflow.nodes.title') }}</h3>
               
               <div class="nodes-grid">
                 <div class="node-item" v-for="node in nodes" :key="node.id">
                   <div class="node-icon">{{ node.icon }}</div>
                   <div class="node-info">
-                    <div class="node-name">{{ node.name }}</div>
-                    <div class="node-desc">{{ node.desc }}</div>
+                    <div class="node-name">{{ t(`workflow.nodes.${node.key}.name`) }}</div>
+                    <div class="node-desc">{{ t(`workflow.nodes.${node.key}.desc`) }}</div>
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="content-card">
-              <h3>示例：分析新闻文章</h3>
+              <h3>{{ t('workflow.example.title') }}</h3>
               
               <div class="workflow-example">
                 <div class="example-step">
                   <div class="example-number">1</div>
                   <div class="example-content">
-                    <strong>拖拽三个节点：</strong>
+                    <strong>{{ t('workflow.example.step1.title') }}</strong>
                     <div class="node-tags">
-                      <span class="node-tag">🕸️ 网页抓取</span>
-                      <span class="node-tag">📚 知识库节点</span>
-                      <span class="node-tag">🤖 推理节点</span>
+                      <span v-for="(tag, index) in t('workflow.example.step1.tags')" 
+                            :key="index" 
+                            class="node-tag">{{ tag }}</span>
                     </div>
                   </div>
                 </div>
@@ -299,23 +279,18 @@
                 <div class="example-step">
                   <div class="example-number">2</div>
                   <div class="example-content">
-                    <strong>连接节点：</strong>
-                    <p>点击节点底部的连接点 → 拖到下一个节点顶部</p>
-                    <div class="flow-simple">
-                      网页内容 → 知识库检索 → AI分析
-                    </div>
+                    <strong>{{ t('workflow.example.step2.title') }}</strong>
+                    <p>{{ t('workflow.example.step2.description') }}</p>
+                    <div class="flow-simple">{{ t('workflow.example.step2.flow') }}</div>
                   </div>
                 </div>
 
                 <div class="example-step">
                   <div class="example-number">3</div>
                   <div class="example-content">
-                    <strong>配置并运行：</strong>
+                    <strong>{{ t('workflow.example.step3.title') }}</strong>
                     <ul>
-                      <li>网页抓取：输入网址</li>
-                      <li>知识库：选择你的知识库</li>
-                      <li>推理节点：输入分析指令</li>
-                      <li>点击"运行所有节点"</li>
+                      <li v-for="(item, index) in t('workflow.example.step3.items')" :key="index">{{ item }}</li>
                     </ul>
                   </div>
                 </div>
@@ -329,8 +304,8 @@
           <div class="section-header">
             <div class="section-icon">❓</div>
             <div class="section-title-content">
-              <h2>常见问题</h2>
-              <p class="section-desc">新手最常遇到的问题</p>
+              <h2>{{ t('sections.faq.title') }}</h2>
+              <p class="section-desc">{{ t('sections.faq.subtitle') }}</p>
             </div>
           </div>
 
@@ -344,11 +319,11 @@
               >
                 <div class="faq-question">
                   <span class="faq-number">Q{{ index + 1 }}</span>
-                  <span class="faq-text">{{ faq.question }}</span>
+                  <span class="faq-text">{{ t(`faq.${index}.question`) }}</span>
                   <i :class="['fa', faqOpen[index] ? 'fa-chevron-up' : 'fa-chevron-down']"></i>
                 </div>
                 <div class="faq-answer" v-if="faqOpen[index]">
-                  <p>{{ faq.answer }}</p>
+                  <p>{{ t(`faq.${index}.answer`) }}</p>
                 </div>
               </div>
             </div>
@@ -359,17 +334,17 @@
         <div class="main-footer">
           <div class="footer-content">
             <div class="footer-tip">
-              💡 <strong>使用建议：</strong>从最简单功能开始，逐步组合使用。有问题随时查阅帮助！
+              <strong>{{ t('footer.tip.label') }}</strong> {{ t('footer.tip.text') }}
             </div>
             <div class="footer-links">
               <a href="https://github.com/whl1207/Knowledge/issues" target="_blank">
-                <i class="fa fa-bug"></i> 反馈问题
+                <i class="fa fa-bug"></i> {{ t('footer.links.feedback') }}
               </a>
               <a href="https://github.com/whl1207/Knowledge" target="_blank">
-                <i class="fa fa-github"></i> 查看源码
+                <i class="fa fa-github"></i> {{ t('footer.links.source') }}
               </a>
               <a href="https://mineru.com.cn/" target="_blank">
-                <i class="fa fa-file"></i> MinerU转换器
+                <i class="fa fa-file"></i> {{ t('footer.links.mineru') }}
               </a>
             </div>
           </div>
@@ -380,53 +355,67 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { usestore } from '../../store'
+
+const store = usestore()
+
+// 根据store的语言设置返回当前语言
+const currentLocale = computed(() => store.locales || 'zh')
+
+// 国际化函数
+const t = (key: string) => {
+  const keys = key.split('.')
+  // 使用类型断言绕过索引签名限制
+  let value: any = (translations as Record<string, any>)[currentLocale.value]
+  
+  for (const k of keys) {
+    if (value && value[k] !== undefined) {
+      value = value[k]
+    } else {
+      // 如果找不到对应语言的翻译，回退到中文
+      let fallback: any = translations.zh
+      for (const fk of keys) {
+        if (fallback && fallback[fk] !== undefined) {
+          fallback = fallback[fk]
+        } else {
+          return key
+        }
+      }
+      return fallback
+    }
+  }
+  return value
+}
 
 // 导航展开状态
 const navExpanded = ref(false)
 const activeSection = ref('quick-start')
 const faqOpen = ref<Record<number, boolean>>({})
 
-// 章节定义
+// 章节定义（图标和ID保持不变，标题通过国际化获取）
 const sections = ref([
-  { id: 'quick-start', icon: '🚀', title: '快速开始', subtitle: '5分钟体验' },
-  { id: 'ai-chat', icon: '🤖', title: '智能对话', subtitle: 'RAG助手' },
-  { id: 'knowledge', icon: '📚', title: '知识管理', subtitle: '数字大脑' },
-  { id: 'workflow', icon: '🔗', title: '工作流', subtitle: '自动化' },
-  { id: 'faq', icon: '❓', title: '常见问题', subtitle: '新手必读' }
+  { id: 'quick-start', icon: '🚀' },
+  { id: 'ai-chat', icon: '🤖' },
+  { id: 'knowledge', icon: '📚' },
+  { id: 'workflow', icon: '🔗' },
+  { id: 'faq', icon: '❓' }
 ])
 
-// 节点列表
+// 节点列表（带key用于国际化）
 const nodes = ref([
-  { id: 1, icon: '📝', name: '文本节点', desc: '输入固定文本' },
-  { id: 2, icon: '📁', name: '本地文件', desc: '读取电脑文件' },
-  { id: 3, icon: '🌐', name: '网络搜索', desc: '上网查资料' },
-  { id: 4, icon: '🕸️', name: '网页抓取', desc: '获取网页内容' },
-  { id: 5, icon: '🤖', name: '推理节点', desc: '调用AI思考' },
-  { id: 6, icon: '🐍', name: 'Python节点', desc: '运行代码' },
-  { id: 7, icon: '📚', name: '知识库节点', desc: '从知识库找资料' },
-  { id: 8, icon: '📊', name: '结构化节点', desc: '表格数据处理' }
+  { id: 1, icon: '📝', key: 'text' },
+  { id: 2, icon: '📁', key: 'file' },
+  { id: 3, icon: '🌐', key: 'webSearch' },
+  { id: 4, icon: '🕸️', key: 'webCrawl' },
+  { id: 5, icon: '🤖', key: 'inference' },
+  { id: 6, icon: '🐍', key: 'python' },
+  { id: 7, icon: '📚', key: 'knowledge' },
+  { id: 8, icon: '📊', key: 'structured' }
 ])
 
-// FAQ列表
-const faqs = ref([
-  { 
-    question: '完全没接触过AI，能学会吗？', 
-    answer: '完全可以！软件设计时考虑了新手，智能对话像普通聊天，知识管理像整理文件夹，有详细教程。'
-  },
-  { 
-    question: '需要付费吗？', 
-    answer: '软件免费开源。AI部分：Ollama模型免费（需电脑运行），其他商业API可能需付费。'
-  },
-  { 
-    question: '数据安全吗？', 
-    answer: '所有数据保存在你的本地电脑，知识库在自选文件夹，聊天记录和工作流都在本地。'
-  },
-  { 
-    question: '应该先学习哪个功能？', 
-    answer: '建议顺序：1.智能对话（最简单）2.任务管理 3.知识管理 4.工作流编辑（进阶）。'
-  }
-])
+// FAQ列表（数量固定，内容通过国际化获取）
+const faqs = ref([0, 1, 2, 3]) // 4个FAQ
 
 // 切换FAQ
 const toggleFaq = (index: number) => {
@@ -472,6 +461,344 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('scroll', handleScroll)
 })
+
+// 中英文翻译数据
+const translations = {
+  zh: {
+    nav: {
+      title: 'AI-KM 帮助'
+    },
+    header: {
+      title: 'AI-KM 智能生产力平台',
+      subtitle: '新手友好指南 - 四大核心功能'
+    },
+    sections: {
+      'quick-start': {
+        title: '快速开始',
+        subtitle: '5分钟体验'
+      },
+      'ai-chat': {
+        title: '智能对话',
+        subtitle: 'RAG助手'
+      },
+      'knowledge': {
+        title: '知识管理',
+        subtitle: '数字大脑'
+      },
+      'workflow': {
+        title: '工作流',
+        subtitle: '自动化'
+      },
+      'faq': {
+        title: '常见问题',
+        subtitle: '新手必读'
+      }
+    },
+    quickStart: {
+      step1: {
+        title: '体验智能对话',
+        items: ['点击左侧AI图标', '问个问题如"你好"', '感受AI的回答']
+      },
+      step2: {
+        title: '记录灵感',
+        items: ['点击顶部"+"号', '输入想法', '点击保存']
+      },
+      step3: {
+        title: '创建任务',
+        items: ['进入任务管理', '点击"新建任务"', '设置时间开始']
+      },
+      step4: {
+        title: '知识库体验',
+        items: ['导入一个文档', '点击"处理"按钮', '问AI相关问题']
+      }
+    },
+    aiChat: {
+      concept: {
+        title: '核心概念：RAG技术',
+        description: 'AI不仅能回答问题，还能<strong>参考你的个人文档库</strong>来回答问题。',
+        example: {
+          title: '📌 使用场景：',
+          question: '询问："我的项目报告里提到的时间节点是什么？"',
+          answer: 'AI会自动从你上传的项目文档中查找相关信息，然后回答。'
+        }
+      },
+      guide: {
+        title: '三步使用指南',
+        step1: {
+          title: '安装Ollama（推荐）',
+          items: [
+            '访问 <a href="https://ollama.com/" target="_blank">ollama.com</a>',
+            '运行 <code>ollama serve</code>',
+            '运行 <code>ollama pull qwen3</code>'
+          ]
+        },
+        step2: {
+          title: '创建聊天对话',
+          items: ['点击"新建聊天"', '选择模型（如qwen3）', '开始对话，像微信一样简单']
+        },
+        step3: {
+          title: '关联知识库',
+          items: ['点击书本图标 📚', '选择.kb格式知识库', 'AI回答时会自动从知识库找资料']
+        }
+      }
+    },
+    knowledge: {
+      process: {
+        title: '知识处理流程',
+        step1: '导入文档',
+        step2: '知识切片',
+        step3: '向量化',
+        step4: '智能检索'
+      },
+      steps: {
+        title: '操作步骤',
+        step1: {
+          title: '导入文档',
+          description: '支持：Markdown、PDF、Word、TXT',
+          tip: '💡 建议先用 <a href="https://mineru.com.cn/" target="_blank">MinerU</a> 转换格式'
+        },
+        step2: {
+          title: '创建知识库',
+          items: ['点击"知识管理"菜单', '选择文件夹', '点击"处理"按钮']
+        },
+        step3: {
+          title: '使用知识库',
+          useCases: ['💬 智能对话', '🔗 工作流', '🔍 独立检索']
+        }
+      }
+    },
+    workflow: {
+      nodes: {
+        title: '八大节点类型',
+        text: { name: '文本节点', desc: '输入固定文本' },
+        file: { name: '本地文件', desc: '读取电脑文件' },
+        webSearch: { name: '网络搜索', desc: '上网查资料' },
+        webCrawl: { name: '网页抓取', desc: '获取网页内容' },
+        inference: { name: '推理节点', desc: '调用AI思考' },
+        python: { name: 'Python节点', desc: '运行代码' },
+        knowledge: { name: '知识库节点', desc: '从知识库找资料' },
+        structured: { name: '结构化节点', desc: '表格数据处理' }
+      },
+      example: {
+        title: '示例：分析新闻文章',
+        step1: {
+          title: '拖拽三个节点：',
+          tags: ['🕸️ 网页抓取', '📚 知识库节点', '🤖 推理节点']
+        },
+        step2: {
+          title: '连接节点：',
+          description: '点击节点底部的连接点 → 拖到下一个节点顶部',
+          flow: '网页内容 → 知识库检索 → AI分析'
+        },
+        step3: {
+          title: '配置并运行：',
+          items: [
+            '网页抓取：输入网址',
+            '知识库：选择你的知识库',
+            '推理节点：输入分析指令',
+            '点击"运行所有节点"'
+          ]
+        }
+      }
+    },
+    faq: [
+      {
+        question: '完全没接触过AI，能学会吗？',
+        answer: '完全可以！软件设计时考虑了新手，智能对话像普通聊天，知识管理像整理文件夹，有详细教程。'
+      },
+      {
+        question: '需要付费吗？',
+        answer: '软件免费开源。AI部分：Ollama模型免费（需电脑运行），其他商业API可能需付费。'
+      },
+      {
+        question: '数据安全吗？',
+        answer: '所有数据保存在你的本地电脑，知识库在自选文件夹，聊天记录和工作流都在本地。'
+      },
+      {
+        question: '应该先学习哪个功能？',
+        answer: '建议顺序：1.智能对话（最简单）2.任务管理 3.知识管理 4.工作流编辑（进阶）。'
+      }
+    ],
+    footer: {
+      tip: {
+        label: '💡 使用建议：',
+        text: '从最简单功能开始，逐步组合使用。有问题随时查阅帮助！'
+      },
+      links: {
+        feedback: '反馈问题',
+        source: '查看源码',
+        mineru: 'MinerU转换器'
+      }
+    }
+  },
+  en: {
+    nav: {
+      title: 'AI-KM Help'
+    },
+    header: {
+      title: 'AI-KM Intelligent Productivity Platform',
+      subtitle: 'Beginner Friendly Guide - 4 Core Features'
+    },
+    sections: {
+      'quick-start': {
+        title: 'Quick Start',
+        subtitle: '5 min experience'
+      },
+      'ai-chat': {
+        title: 'AI Chat',
+        subtitle: 'RAG Assistant'
+      },
+      'knowledge': {
+        title: 'Knowledge',
+        subtitle: 'Digital Brain'
+      },
+      'workflow': {
+        title: 'Workflow',
+        subtitle: 'Automation'
+      },
+      'faq': {
+        title: 'FAQ',
+        subtitle: 'Must read'
+      }
+    },
+    quickStart: {
+      step1: {
+        title: 'Try AI Chat',
+        items: ['Click AI icon on left', 'Ask "Hello"', 'Experience AI response']
+      },
+      step2: {
+        title: 'Save Ideas',
+        items: ['Click "+" on top', 'Enter your idea', 'Click save']
+      },
+      step3: {
+        title: 'Create Task',
+        items: ['Go to Task Management', 'Click "New Task"', 'Set time and start']
+      },
+      step4: {
+        title: 'Try Knowledge Base',
+        items: ['Import a document', 'Click "Process"', 'Ask AI related questions']
+      }
+    },
+    aiChat: {
+      concept: {
+        title: 'Core Concept: RAG Technology',
+        description: 'AI can answer questions by <strong>referencing your personal document library</strong>.',
+        example: {
+          title: '📌 Use Case:',
+          question: 'Ask: "What are the deadlines mentioned in my project report?"',
+          answer: 'AI will automatically search your uploaded project documents and answer.'
+        }
+      },
+      guide: {
+        title: '3-Step Guide',
+        step1: {
+          title: 'Install Ollama (Recommended)',
+          items: [
+            'Visit <a href="https://ollama.com/" target="_blank">ollama.com</a>',
+            'Run <code>ollama serve</code>',
+            'Run <code>ollama pull qwen3</code>'
+          ]
+        },
+        step2: {
+          title: 'Start a Chat',
+          items: ['Click "New Chat"', 'Select model (e.g., qwen3)', 'Start chatting']
+        },
+        step3: {
+          title: 'Connect Knowledge Base',
+          items: ['Click book icon 📚', 'Select .kb knowledge base', 'AI will automatically reference it']
+        }
+      }
+    },
+    knowledge: {
+      process: {
+        title: 'Knowledge Processing Flow',
+        step1: 'Import',
+        step2: 'Chunking',
+        step3: 'Vectorize',
+        step4: 'Retrieval'
+      },
+      steps: {
+        title: 'Steps',
+        step1: {
+          title: 'Import Documents',
+          description: 'Support: Markdown, PDF, Word, TXT',
+          tip: '💡 Use <a href="https://mineru.com.cn/" target="_blank">MinerU</a> for format conversion'
+        },
+        step2: {
+          title: 'Create Knowledge Base',
+          items: ['Click "Knowledge" menu', 'Select folder', 'Click "Process"']
+        },
+        step3: {
+          title: 'Use Knowledge Base',
+          useCases: ['💬 AI Chat', '🔗 Workflow', '🔍 Standalone Search']
+        }
+      }
+    },
+    workflow: {
+      nodes: {
+        title: '8 Node Types',
+        text: { name: 'Text', desc: 'Static text input' },
+        file: { name: 'File', desc: 'Read local files' },
+        webSearch: { name: 'Web Search', desc: 'Search online' },
+        webCrawl: { name: 'Web Crawl', desc: 'Fetch web content' },
+        inference: { name: 'Inference', desc: 'AI reasoning' },
+        python: { name: 'Python', desc: 'Run Python code' },
+        knowledge: { name: 'Knowledge', desc: 'Query knowledge base' },
+        structured: { name: 'Structured', desc: 'Process tabular data' }
+      },
+      example: {
+        title: 'Example: Analyze News Article',
+        step1: {
+          title: 'Drag 3 nodes:',
+          tags: ['🕸️ Web Crawl', '📚 Knowledge', '🤖 Inference']
+        },
+        step2: {
+          title: 'Connect nodes:',
+          description: 'Click bottom connector → Drag to next node top',
+          flow: 'Web Content → Knowledge Search → AI Analysis'
+        },
+        step3: {
+          title: 'Configure and run:',
+          items: [
+            'Web Crawl: Enter URL',
+            'Knowledge: Select your knowledge base',
+            'Inference: Enter analysis prompt',
+            'Click "Run All Nodes"'
+          ]
+        }
+      }
+    },
+    faq: [
+      {
+        question: 'Can I learn it with no AI experience?',
+        answer: 'Absolutely! The software is designed for beginners. AI chat works like regular chat, knowledge management is like organizing folders, with detailed tutorials.'
+      },
+      {
+        question: 'Is it free?',
+        answer: 'The software is free and open-source. For AI: Ollama models are free (run locally), other commercial APIs may require payment.'
+      },
+      {
+        question: 'Is my data secure?',
+        answer: 'All data is stored locally on your computer. Knowledge bases are in your chosen folders, chat history and workflows are all local.'
+      },
+      {
+        question: 'Which feature should I learn first?',
+        answer: 'Suggested order: 1. AI Chat (simplest) 2. Task Management 3. Knowledge Management 4. Workflow Editor (advanced).'
+      }
+    ],
+    footer: {
+      tip: {
+        label: '💡 Tip:',
+        text: 'Start with simple features, then combine them gradually. Check help anytime!'
+      },
+      links: {
+        feedback: 'Feedback',
+        source: 'Source Code',
+        mineru: 'MinerU Converter'
+      }
+    }
+  }
+}
 </script>
 
 <style scoped>
@@ -482,20 +809,28 @@ onUnmounted(() => {
   background-color: var(--backgroundColor);
   color: var(--fontColor);
   overflow: hidden;
+  position: relative;
 }
 
-/* 左侧导航 - 紧凑设计 */
+/* 左侧导航 - 在容器内浮动 */
 .help-nav {
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
   width: 56px;
-  height: 100%;
+  height: auto;
+  max-height: 80vh;
   background-color: var(--menuColor);
-  border-right: 1px solid var(--borderColor);
+  border: 1px solid var(--borderColor);
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   transition: all 0.3s ease;
-  flex-shrink: 0;
-  position: relative;
   z-index: 10;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
 }
 
 .help-nav.expanded {
@@ -509,6 +844,7 @@ onUnmounted(() => {
   padding: 0 12px;
   border-bottom: 1px solid var(--borderColor);
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .nav-icon {
@@ -543,6 +879,7 @@ onUnmounted(() => {
   flex: 1;
   padding: 8px 0;
   overflow-y: auto;
+  max-height: calc(80vh - 120px);
 }
 
 .nav-item {
@@ -614,6 +951,7 @@ onUnmounted(() => {
 .nav-footer {
   padding: 12px;
   border-top: 1px solid var(--borderColor);
+  flex-shrink: 0;
 }
 
 .nav-link {
@@ -634,16 +972,17 @@ onUnmounted(() => {
   text-decoration: none;
 }
 
-/* 主要内容区 - 紧凑设计 */
+/* 主要内容区 - 留出导航空间 */
 .help-main {
   flex: 1;
   height: 100%;
   overflow-y: auto;
-  padding: 16px 24px;
+  padding: 16px 24px 16px 100px;
   max-width: 900px;
   margin: 0 auto;
 }
 
+/* 其余样式保持不变（从上一版本复制） */
 .main-header {
   text-align: center;
   margin-bottom: 24px;
@@ -665,7 +1004,6 @@ onUnmounted(() => {
   margin: 0;
 }
 
-/* 章节样式 */
 .help-section {
   margin-bottom: 24px;
 }
@@ -746,7 +1084,6 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-/* 内容卡片 */
 .section-content {
   display: flex;
   flex-direction: column;
@@ -773,7 +1110,6 @@ onUnmounted(() => {
   margin-bottom: 12px;
 }
 
-/* 智能对话部分 */
 .example-box {
   background-color: rgba(var(--fontActiveColor-rgb), 0.05);
   border-radius: 8px;
@@ -835,13 +1171,13 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 
-/* 知识管理部分 */
 .flow-diagram {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin: 16px 0;
   padding: 0 10px;
+  flex-wrap: wrap;
 }
 
 .flow-step {
@@ -923,6 +1259,7 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .use-case {
@@ -933,7 +1270,6 @@ onUnmounted(() => {
   font-size: 11px;
 }
 
-/* 工作流部分 */
 .nodes-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1015,6 +1351,7 @@ onUnmounted(() => {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .node-tag {
@@ -1036,7 +1373,6 @@ onUnmounted(() => {
   font-size: 13px;
 }
 
-/* FAQ部分 */
 .faq-list {
   margin-top: 8px;
 }
@@ -1096,7 +1432,6 @@ onUnmounted(() => {
   line-height: 1.5;
 }
 
-/* 页脚 */
 .main-footer {
   margin-top: 24px;
   padding-top: 16px;
@@ -1118,6 +1453,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: center;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .footer-links a {
@@ -1137,7 +1473,6 @@ onUnmounted(() => {
   text-decoration: none;
 }
 
-/* 通用样式 */
 code {
   background-color: rgba(255, 255, 255, 0.1);
   padding: 2px 6px;
@@ -1160,21 +1495,11 @@ a:hover {
 /* 响应式设计 */
 @media (max-width: 768px) {
   .help-nav {
-    position: fixed;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    z-index: 100;
-    transform: translateX(-100%);
-  }
-  
-  .help-nav.expanded {
-    transform: translateX(0);
-    width: 220px;
+    left: 10px;
   }
   
   .help-main {
-    padding: 16px;
+    padding: 16px 16px 16px 80px;
   }
   
   .quick-step-row,
@@ -1183,13 +1508,13 @@ a:hover {
   }
   
   .flow-diagram {
-    flex-wrap: wrap;
-    justify-content: center;
+    flex-direction: column;
+    gap: 8px;
   }
   
   .flow-arrow {
     transform: rotate(90deg);
-    margin: 8px 0;
+    margin: 4px 0;
   }
   
   .footer-links {

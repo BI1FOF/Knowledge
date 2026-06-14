@@ -348,7 +348,7 @@
           v-if="!(item.extension=='jpeg'||item.extension=='jpg'||item.extension=='png'||item.extension=='webp')"
           class="title">
           <span>
-            <i :class="store.icon(item.type)" style="position: relative;color:var(--fontColor)"></i>&nbsp;
+            <i :class="store.icon(item.extension || item.type)" style="position: relative;color:var(--fontColor)"></i>&nbsp;
           </span>
           <span>{{item.label}}</span>
         </div>

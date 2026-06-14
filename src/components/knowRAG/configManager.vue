@@ -60,6 +60,10 @@ interface KnowledgeBaseFile {
     reasonedCount?: number
     fileCount?: number
   }
+  ontology?: {
+    entities?: number
+    relations?: number
+  }
 }
 
 // 本地化文本
@@ -261,6 +265,28 @@ const configItems: ConfigItem[] = [
     descriptionEn: 'Weight of reverse inference similarity in comprehensive score'
   },
   {
+    group: 'search',
+    key: 'bm25Enabled',
+    label: '启用BM25检索',
+    labelEn: 'Enable BM25 Search',
+    type: 'checkbox',
+    description: '是否启用BM25算法进行检索（与余弦相似度混合使用）',
+    descriptionEn: 'Whether to enable BM25 algorithm for search (mixed with cosine similarity)'
+  },
+  {
+    group: 'search',
+    key: 'bm25Weight',
+    label: 'BM25权重',
+    labelEn: 'BM25 Weight',
+    type: 'range',
+    min: 0,
+    max: 1,
+    step: 0.01,
+    show: () => props.model.bm25Enabled,
+    description: 'BM25算法在综合评分中的权重',
+    descriptionEn: 'Weight of BM25 algorithm in comprehensive score'
+  },
+  {
     group: 'process',
     key: 'processPrompt',
     label: '知识处理提示词',
@@ -273,12 +299,46 @@ const configItems: ConfigItem[] = [
   },
   {
     group: 'process',
+    key: 'sliceStrategy',
+    label: '切片策略',
+    labelEn: 'Slice Strategy',
+    type: 'select',
+    options: [
+      { value: '默认', label: t('默认（按多个空行切分）', 'Default (Split by empty lines)') },
+      { value: '智能', label: t('智能（按一级标题切分）', 'Smart (Split by top-level headings)') }
+    ],
+    description: '文档切片时使用的策略',
+    descriptionEn: 'Strategy used for document slicing'
+  },
+  {
+    group: 'process',
     key: 'think',
     label: '深度思考',
     labelEn: 'Deep Thinking',
     type: 'checkbox',
     description: '是否启用模型的深度思考模式',
     descriptionEn: 'Whether to enable model deep thinking mode'
+  },
+  {
+    group: 'process',
+    key: 'autoBuildOntology',
+    label: '自动构建本体',
+    labelEn: 'Auto Build Ontology',
+    type: 'checkbox',
+    description: '提取问题后是否自动开始构建本体',
+    descriptionEn: 'Whether to automatically start building ontology after extracting questions'
+  },
+  {
+    group: 'process',
+    key: 'ontologyBatchSize',
+    label: '本体批量大小',
+    labelEn: 'Ontology Batch Size',
+    type: 'number',
+    min: 1,
+    max: 50,
+    step: 1,
+    description: '本体构建时每批处理的切片数量（1-50）',
+    descriptionEn: 'Number of slices per batch when building ontology (1-50)'
   }
 ]
 
@@ -414,6 +474,7 @@ const scanKnowledgeBases = async () => {
             path: file.path,
           }
           
+          // 解析配置信息
           if (data.config) {
             kbFile.config = {
               embedModel: data.config.embedModel,
@@ -423,6 +484,15 @@ const scanKnowledgeBases = async () => {
             }
           }
           
+          // 解析本体信息（实体数和关系数）
+          if (data.ontology) {
+            kbFile.ontology = {
+              entities: data.ontology.entities?.length || 0,
+              relations: data.ontology.relations?.length || 0
+            }
+          }
+          
+          // 解析切片元数据
           if (data.blocks && data.blocks.length > 0) {
             const firstBlock = data.blocks[0]
             const hasEmbeddings = !!firstBlock.A_vector
@@ -547,7 +617,13 @@ const resetConfig = () => {
       summaryWeight: 0.0,
       useReverseInference: false,
       reverseInferenceWeight: 0.3,
-      think: false
+      think: false,
+      bm25Enabled: false,
+      bm25Weight: 0.3,
+      bm25K1: 1.5,
+      bm25B: 0.75,
+      autoBuildOntology: false,
+      ontologyBatchSize: 8
     }
     
     Object.assign(props.model, defaultConfig)
@@ -759,7 +835,7 @@ const emit = defineEmits<{
                       </div>
                       
                       <!-- 主要信息网格 -->
-                      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:10px;margin-bottom:8px;">
+                      <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:10px;margin-bottom:8px;">
                         <!-- 片段统计 -->
                         <div style="font-size:11px;">
                           <div style="color:var(--borderColor);margin-bottom:2px;">{{ t('片段统计', 'Blocks') }}</div>
@@ -781,11 +857,29 @@ const emit = defineEmits<{
                           </div>
                         </div>
                         
+                        <!-- 实体数（从本体中读取） -->
+                        <div style="font-size:11px;">
+                          <div style="color:var(--borderColor);margin-bottom:2px;">{{ t('实体数', 'Entities') }}</div>
+                          <div>
+                            <span style="color:#9C27B0;">{{ kb.ontology?.entities || 0 }}</span> 
+                            {{ t('个实体', 'entities') }}
+                          </div>
+                        </div>
+                        
+                        <!-- 关系数（从本体中读取） -->
+                        <div style="font-size:11px;">
+                          <div style="color:var(--borderColor);margin-bottom:2px;">{{ t('关系数', 'Relations') }}</div>
+                          <div>
+                            <span style="color:#FF9800;">{{ kb.ontology?.relations || 0 }}</span> 
+                            {{ t('个关系', 'relations') }}
+                          </div>
+                        </div>
+                        
                         <!-- 向量维度 -->
                         <div style="font-size:11px;">
                           <div style="color:var(--borderColor);margin-bottom:2px;">{{ t('向量维度', 'Vector Dimension') }}</div>
                           <div>
-                            <span style="color:#9C27B0;">{{ kb.metadata?.avgVectorDimension || '?' }}</span> 
+                            <span style="color:#795548;">{{ kb.metadata?.avgVectorDimension || '?' }}</span> 
                             {{ t('维', 'dim') }}
                           </div>
                         </div>
@@ -794,7 +888,7 @@ const emit = defineEmits<{
                         <div style="font-size:11px;">
                           <div style="color:var(--borderColor);margin-bottom:2px;">{{ t('保存时间', 'Saved') }}</div>
                           <div>
-                            <span style="color:#795548;">{{ getSaveTimeText(kb.config?.timestamp) }}</span>
+                            <span>{{ getSaveTimeText(kb.config?.timestamp) }}</span>
                           </div>
                         </div>
                       </div>
@@ -812,6 +906,9 @@ const emit = defineEmits<{
                         </span>
                         <span v-if="kb.config?.version" style="font-size:10px;color:#9C27B0;">
                           <i class="fa fa-code-fork"></i> v{{ kb.config.version }}
+                        </span>
+                        <span v-if="kb.ontology?.entities && kb.ontology.entities > 0" style="font-size:10px;color:#00BCD4;">
+                          <i class="fa fa-sitemap"></i> {{ t('含本体', 'Has Ontology') }}
                         </span>
                       </div>
                     </div>

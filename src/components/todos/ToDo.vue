@@ -37,7 +37,13 @@
     </div>
     
     <div class="header-right">
-      
+      <!-- 搜索框 -->
+      <input 
+        type="text" 
+        v-model="searchText" 
+        :placeholder="getSearchPlaceholder()" 
+        class="search">
+       
       <button 
         v-for="status in statusOptions" 
         :key="status.value"
@@ -48,18 +54,11 @@
         <i :class="status.icon"></i>
       </button>
       
-      <!-- 搜索框 -->
-      <input 
-        type="text" 
-        v-model="searchText" 
-        :placeholder="getSearchPlaceholder()" 
-        class="search">
-      
       <!-- 视图控制 -->
       <button @click="addItem" :title="`添加项目`">
         <i class="fa fa-plus"></i>
       </button>
-      <button @click="showDataSet = !showDataSet" :class="{ active: showDataSet }" title="数据管理">
+      <button @click="toggleDataSet" :class="{ active: showDataSet }" title="数据管理">
         <i class="fa fa-cogs"></i>
       </button>
     </div>
@@ -110,7 +109,7 @@
           </div>
         </div>
         
-        <!-- 瀑布流列表布局 - 修改样式 -->
+        <!-- 瀑布流列表布局 -->
         <div v-else class="list-container">
           <div v-for="item in filteredItems" 
               :key="item.id"
@@ -120,17 +119,12 @@
             <div class="list-item-content">
               <div class="list-item-title">{{ item.title }}</div>
               <div class="list-item-meta">
-                <!-- 状态图标 -->
                 <span class="list-status-icon" :title="item.status">
                   <i :class="getStatusIcon(item.status)"></i>
                 </span>
                 <span class="list-item-date">
                   {{ formatItemTime(item.createdTime) }}
                 </span>
-                <div v-if="item.startTime && item.endTime" class="list-item-dates">
-                  <i class="fa fa-calendar"></i> 
-                  {{ formatDateForDisplay(item.startTime) }} - {{ formatDateForDisplay(item.endTime) }}
-                </div>
                 <span v-if="item.startTime && item.endTime" class="list-item-dates">
                   <i class="fa fa-calendar"></i> 
                   {{ formatDateForDisplay(item.startTime) }} - {{ formatDateForDisplay(item.endTime) }}
@@ -143,8 +137,9 @@
         <!-- 空状态 -->
         <div v-if="filteredItems.length === 0" class="empty-state full-size">
           <i class="fa" :class="getViewIcon()"></i>
-          <p>暂无项目</p>
-          <p class="empty-hint">点击右上角的 + 按钮添加项目</p>
+          <p v-if="!workspacePath">请先选择工作区</p>
+          <p v-else>暂无项目</p>
+          <p class="empty-hint" v-if="workspacePath">点击右上角的 + 按钮添加项目</p>
         </div>
       </div>
     </div>
@@ -183,17 +178,14 @@
         <!-- 空状态 -->
         <div v-if="treeItems.length === 0" class="empty-state full-size">
           <i class="fa fa-sitemap"></i>
-          <p v-if="selectedStatuses.length > 0 || searchText">没有符合条件的项目</p>
+          <p v-if="!workspacePath">请先选择工作区</p>
+          <p v-else-if="selectedStatuses.length > 0 || searchText">没有符合条件的项目</p>
           <p v-else>暂无项目</p>
-          <p class="empty-hint">
-            <span v-if="selectedStatuses.length > 0">当前筛选状态: {{ getSelectedStatusLabels() }}</span>
-            <span v-else>可以添加任何状态的项目</span>
-          </p>
         </div>
       </div>
     </div>
     
-    <!-- 月视图 - 使用筛选后的项目 -->
+    <!-- 月视图 -->
     <div class="container" v-if="currentView === 'month'">
       <table class="month-table">
         <thead>
@@ -212,7 +204,6 @@
                 @click="changeSelectedDate(date.dateObject)">
               <div class="date-title" :class="{ today: isToday(date.dateObject) }">{{ date.day }}</div>
               <div class="date-items scoll">
-                <!-- 跨天任务渲染 - 使用筛选后的项目 -->
                 <div v-for="item in getItemsForDate(date.dateObject)" 
                      :key="item.id" 
                      class="task-span"
@@ -232,7 +223,7 @@
       </table>
     </div>
     
-    <!-- 周视图 - 使用筛选后的项目 -->
+    <!-- 周视图 -->
     <div class="container container-flex" v-if="currentView === 'week'">
       <div class="week-calendar">
         <div class="week-days">
@@ -250,131 +241,159 @@
         </div>
       </div>
       <div class="tasks scoll full-height">
-        <!-- 使用筛选后的项目 -->
         <div v-for="item in filteredWeekItems" 
           :key="item.id"
           @click="selectItem(item)">
-        <div class="task" 
-            :class="{ active: selectedItem && selectedItem.id === item.id }"
-            :style="{ '--task-color': item.color || '#e9ecef' }">
-          <div class="task-header">
-            <div class="task-title">{{ item.title }}</div>
-          </div>
-          <div class="task-dates">
-            <span class="task-status-icon" :title="item.status">
-              <i :class="getStatusIcon(item.status)"></i>
-            </span>
-            {{ formatDateForDisplay(item.startTime) }} - {{ formatDateForDisplay(item.endTime) }}
+          <div class="task" 
+              :class="{ active: selectedItem && selectedItem.id === item.id }"
+              :style="{ '--task-color': item.color || '#e9ecef' }">
+            <div class="task-header">
+              <div class="task-title">{{ item.title }}</div>
+            </div>
+            <div class="task-dates">
+              <span class="task-status-icon" :title="item.status">
+                <i :class="getStatusIcon(item.status)"></i>
+              </span>
+              {{ formatDateForDisplay(item.startTime) }} - {{ formatDateForDisplay(item.endTime) }}
+            </div>
           </div>
         </div>
-      </div>
         
         <!-- 空状态 -->
         <div v-if="filteredWeekItems.length === 0" class="empty-state">
           <i class="fa fa-calendar"></i>
-          <p>本周没有任务</p>
-          <p class="empty-hint">为任务设置日期后会自动出现在这里</p>
+          <p v-if="!workspacePath">请先选择工作区</p>
+          <p v-else>本周没有任务</p>
         </div>
       </div>
     </div>
     
-    <!-- 属性编辑界面 -->
-    <div class="property scoll" v-if="selectedItem">
-      <div class="property-header">
-        <h3 class="property-title">{{ selectedItem.title || '编辑项目' }}</h3>
-        <div class="property-close-btn" @click="clearSelected">
-          <i class="fa fa-times"></i>
+    <!-- 右侧面板：属性编辑和DataSet共享位置 -->
+    <div class="right-panel" v-if="selectedItem || showDataSet">
+      <!-- 属性编辑界面 - 保持原有紧凑样式 -->
+      <div class="property scoll" v-if="selectedItem && !showDataSet">
+        <div class="property-header">
+          <h3 class="property-title">项目属性</h3>
+          <div class="property-close-btn" @click="clearSelected">
+            <i class="fa fa-times"></i>
+          </div>
+        </div>
+        
+        <div class="property-content">
+          <!-- 标题编辑 - 只在焦点离开时保存 -->
+          <div class="property-field">
+            <textarea 
+              :value="selectedItemTitle" 
+              class="property-input scoll"
+              @input="onTitleInput($event)"
+              @blur="onBlur"
+              :placeholder="'项目标题...'"
+              rows="2">
+            </textarea>
+          </div>
+          
+          <!-- 正文编辑 - 只在焦点离开时保存 -->
+          <div class="property-field">
+            <textarea 
+              :value="selectedItemContent"
+              class="property-input scoll"
+              @input="onContentInput($event)"
+              @blur="onBlur"
+              :placeholder="'详细说明...'"
+              rows="6">
+            </textarea>
+          </div>
+
+          <!-- 颜色选择 -->
+          <div class="property-field">
+            <div class="color-picker">
+              <div class="color-options">
+                <div 
+                  v-for="color in colorOptions" 
+                  :key="color"
+                  class="color-option"
+                  :style="{ backgroundColor: color }"
+                  :class="{ selected: selectedItem.color === color }"
+                  @click="selectColor(color, selectedItem)">
+                  <i v-if="selectedItem.color === color" class="fa fa-check color-option-check"></i>
+                </div>
+              </div>
+              <input 
+                type="color" 
+                :value="selectedItem.color || colorOptions[0]"
+                @input="(e) => {
+                  const target = e.target as HTMLInputElement;
+                  const color = target?.value;
+                  if (color && selectedItem) {
+                    selectedItem.color = color;
+                    saveIfNeeded('颜色更改');
+                  }
+                }"
+                class="color-input">
+            </div>
+          </div>
+
+          <!-- 状态选择 -->
+          <div class="property-field">
+            <label class="property-label">状态</label>
+            <select :value="selectedItem?.status" 
+              class="property-select"
+              @change="updateItemStatus($event)">
+              <option value="灵感">灵感</option>
+              <option value="规划">规划</option>
+              <option value="待办">待办</option>
+              <option value="进行中">进行中</option>
+              <option value="已完成">已完成</option>
+            </select>
+          </div>
+          
+          <!-- 开始时间 -->
+          <div v-if="selectedItem?.status !== '灵感'" class="property-field">
+            <label class="property-label">开始时间</label>
+            <input type="date" 
+              class="property-date-input"
+              :value="formatDateForInput(selectedItem?.startTime)" 
+              @change="(e) => {
+                updateStartTime(e, selectedItem!);
+              }">
+          </div>
+
+          <!-- 结束时间 -->
+          <div v-if="selectedItem?.status !== '灵感'" class="property-field">
+            <label class="property-label">结束时间</label>
+            <input type="date" 
+              class="property-date-input"
+              :value="formatDateForInput(selectedItem?.endTime)" 
+              @change="(e) => {
+                updateEndTime(e, selectedItem!);
+              }">
+          </div>
+          
+          <!-- 删除按钮 -->
+          <div class="property-field">
+            <div class="property-btn" @click="deleteItem(selectedItem!)">
+              <i class="fa fa-trash"></i> 删除
+            </div>
+          </div>
+
+          <!-- 打开文件夹按钮 -->
+          <div class="property-field" v-if="selectedItem?.filePath">
+            <div class="property-btn" @click="openInFolder(selectedItem)">
+              <i class="fa fa-folder-open"></i> 打开所在文件夹
+            </div>
+          </div>
         </div>
       </div>
       
-      <div class="property-content">
-        <div class="property-field">
-          <input :value="selectedItemTitle" 
-            type="text" 
-            class="property-input"
-            @input="updateSelectedItemTitle($event)"
-            @blur="updateSelectedItem(selectedItem!)"
-            @keyup.enter="updateSelectedItem(selectedItem!)"
-            :placeholder="'项目标题...'">
-        </div>
-        
-        <div class="property-field">
-          <div class="color-picker">
-            <div class="color-options">
-              <div 
-                v-for="color in colorOptions" 
-                :key="color"
-                class="color-option"
-                :style="{ backgroundColor: color }"
-                :class="{ selected: selectedItem.color === color }"
-                @click="selectColor(color, selectedItem)">
-                <i v-if="selectedItem.color === color" class="fa fa-check color-option-check"></i>
-              </div>
-            </div>
-            <input 
-              type="color" 
-              :value="selectedItem.color || colorOptions[0]"
-              @input="(e) => {
-                const target = e.target as HTMLInputElement;
-                const color = target?.value;
-                if (color && selectedItem) {
-                  selectedItem.color = color;
-                  updateSelectedItem(selectedItem);
-                }
-              }"
-              class="color-input">
-          </div>
-        </div>
-        
-        <div class="property-field">
-          <label class="property-label">状态</label>
-          <select :value="selectedItem?.status" 
-            class="property-select"
-            @change="updateItemStatus($event)">
-            <option value="灵感">灵感</option>
-            <option value="规划">规划</option>
-            <option value="待办">待办</option>
-            <option value="进行中">进行中</option>
-            <option value="已完成">已完成</option>
-          </select>
-        </div>
-        
-        <div v-if="selectedItem?.status !== '灵感'" class="property-field">
-          <label class="property-label">开始时间</label>
-          <input type="date" 
-            class="property-date-input"
-            :value="formatDateForInput(selectedItem?.startTime)" 
-            @change="(e) => {
-              updateStartTime(e, selectedItem!);
-              updateSelectedItem(selectedItem!);
-            }">
-        </div>
-
-        <div v-if="selectedItem?.status !== '灵感'" class="property-field">
-          <label class="property-label">结束时间</label>
-          <input type="date" 
-            class="property-date-input"
-            :value="formatDateForInput(selectedItem?.endTime)" 
-            @change="(e) => {
-              updateEndTime(e, selectedItem!);
-              updateSelectedItem(selectedItem!);
-            }">
-        </div>
-        
-        <div class="property-field">
-          <div class="property-btn" @click="deleteItem(selectedItem!)">
-            <i class="fa fa-trash"></i> 删除
-          </div>
-        </div>
-      </div>
+      <!-- DataSet 组件 -->
+      <DataSet 
+        v-if="showDataSet" 
+        @data-imported="handleDataImported"
+        @data-cleared="handleDataCleared"
+        :workspacePath="workspacePath"
+        @workspace-changed="handleWorkspaceChanged"
+      />
     </div>
-    
-    <!-- 数据管理面板 -->
-    <DataSet 
-      v-if="showDataSet" 
-      @data-imported="handleDataImported"
-      @data-cleared="handleDataCleared"
-    />
   </div>
 </div>
 </template>
@@ -470,7 +489,6 @@
   color: var(--fontActiveColor);
 }
 
-/* 状态筛选按钮的激活指示器 */
 .status-filter-btn.active::after {
   content: '';
   position: absolute;
@@ -481,6 +499,18 @@
   height: 4px;
   background-color: var(--fontActiveColor);
   border-radius: 50%;
+}
+
+.search {
+  flex: 1;
+  min-width: 50px;
+  padding: 1px 4px;
+  margin: 0px;
+  margin-right:5px;
+  border-radius: 4px;
+  background-color: var(--backgroundColor);
+  border: 1px solid var(--borderColor);
+  color: var(--fontColor);
 }
 
 /* ========== 通用容器 ========== */
@@ -494,50 +524,6 @@
 
 .container-flex {
   flex: 1;
-}
-
-/* ========== 通用工具栏 ========== */
-.toolbar {
-  background: var(--backgroundColor);
-  flex-shrink: 0;
-  padding: 5px;
-  display: flex;
-  gap: 5px;
-  align-items: center;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.toolbar-action-btn {
-  padding: 6px;
-  border: 1px solid var(--borderColor);
-  border-radius: 4px;
-  background: var(--backgroundColor);
-  color: var(--fontColor);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-}
-
-.toolbar-action-btn:hover {
-  background: var(--menuActiveColor);
-}
-
-.search {
-  flex: 1;
-  min-width: 50px;
-  padding: 1px 4px;
-  margin: 0px;
-  margin-right:5px;
-  border-radius: 4px;
-  background-color: var(--backgroundColor);
-  border: 1px solid var(--borderColor);
-  color: var(--fontColor);
 }
 
 /* ========== 瀑布流视图 ========== */
@@ -616,38 +602,6 @@
   text-align: right;
 }
 
-.grid-card-status {
-  padding: 2px 6px;
-  border-radius: 5px;
-  background: var(--menuActiveColor);
-  color: var(--fontColor);
-}
-
-.grid-card-status.灵感 {
-  background: #fff3cd;
-  color: #856404;
-}
-
-.grid-card-status.规划 {
-  background: #d1ecf1;
-  color: #0c5460;
-}
-
-.grid-card-status.待办 {
-  background: #d4edda;
-  color: #155724;
-}
-
-.grid-card-status.进行中 {
-  background: #cce5ff;
-  color: #004085;
-}
-
-.grid-card-status.已完成 {
-  background: #f8f9fa;
-  color: #6c757d;
-}
-
 .grid-card-dates {
   margin: 0;
   font-size: 11px;
@@ -676,40 +630,6 @@
   opacity: 0.6;
 }
 
-/* 列表布局中的时间显示增强 */
-.list-item-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column; /* 改为列布局 */
-}
-
-.list-item-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--fontColor);
-  opacity: 0.8;
-  flex-wrap: wrap;
-}
-
-.list-item-dates {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-  flex-shrink: 0;
-  background: var(--menuActiveColor);
-  border-radius: 3px;
-  padding: 2px 6px;
-  margin-right: 5px;
-}
-
-.list-item-dates i {
-  font-size: 10px;
-}
-
-/* 列表布局样式 */
 .list-container {
   display: flex;
   flex-direction: column;
@@ -738,8 +658,7 @@
 .list-item-content {
   flex: 1;
   display: flex;
-  flex-direction: row;
-  justify-content: center;
+  flex-direction: column;
 }
 
 .list-item-title {
@@ -752,30 +671,17 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
-  flex:1;
 }
 
 .list-item-meta {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   font-size: 11px;
   color: var(--fontColor);
   opacity: 0.8;
   flex-wrap: wrap;
-}
-
-.list-item-status {
-  padding: 2px 6px;
-  border-radius: 10px;
-  font-size: 11px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.list-item-date {
-  white-space: nowrap;
-  flex-shrink: 0;
+  margin-top: 4px;
 }
 
 .list-item-dates {
@@ -784,22 +690,13 @@
   gap: 4px;
   white-space: nowrap;
   flex-shrink: 0;
-}
-
-.list-item-action-btn {
-  padding: 6px;
-  border: 1px solid var(--borderColor);
-  border-radius: 4px;
-  background: var(--backgroundColor);
-  color: var(--fontColor);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.list-item-action-btn:hover {
   background: var(--menuActiveColor);
+  border-radius: 3px;
+  padding: 2px 6px;
+}
+
+.list-item-dates i {
+  font-size: 10px;
 }
 
 /* ========== 树状图视图 ========== */
@@ -920,23 +817,6 @@
   flex: 1;
 }
 
-.task-span-status {
-  padding: 1px 4px;
-  border-radius: 8px;
-  font-size: 9px;
-  flex-shrink: 0;
-}
-
-.task-complete-icon {
-  opacity: 0.5;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.task-span:hover .task-complete-icon {
-  opacity: 1;
-}
-
 /* ========== 周视图 ========== */
 .week-calendar {
   display: flex;
@@ -1008,7 +888,6 @@
   color: var(--fontColor);
 }
 
-/* ========== 周视图任务列表 ========== */
 .tasks {
   border-radius: 4px;
   overflow-y: auto;
@@ -1060,43 +939,6 @@
   padding: 0 5px;
 }
 
-.task-status {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  margin-left: 5px;
-  width: 40px;
-  text-align: center;
-  flex-shrink: 0;
-  background: var(--menuActiveColor);
-  color: var(--fontColor);
-}
-
-.task-status.灵感 {
-  background: #fff3cd;
-  color: #856404;
-}
-
-.task-status.规划 {
-  background: #d1ecf1;
-  color: #0c5460;
-}
-
-.task-status.待办 {
-  background: #d4edda;
-  color: #155724;
-}
-
-.task-status.进行中 {
-  background: #cce5ff;
-  color: #004085;
-}
-
-.task-status.已完成 {
-  background: #f8f9fa;
-  color: #6c757d;
-}
-
 .task-dates {
   font-size: 12px;
   color: var(--fontColor);
@@ -1105,12 +947,19 @@
   white-space: nowrap;
 }
 
-/* ========== 属性编辑界面 ========== */
-.property {
-  width: 180px;
-  padding: 5px;
+/* ========== 右侧面板 ========== */
+.right-panel {
+  width: 200px;
   border-left: 1px solid var(--borderColor);
   background: var(--backgroundColor);
+  overflow: hidden;
+}
+
+/* ========== 属性编辑界面 - 保持原有紧凑样式 ========== */
+.property {
+  width: calc(100% - 10px);
+  height: calc(100% - 10px);
+  padding: 5px;
   display: flex;
   flex-direction: column;
   overflow-y: auto;
@@ -1120,7 +969,6 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid var(--borderColor);
 }
@@ -1152,16 +1000,20 @@
 
 .property-field {
   margin: 5px 0px;
+  display: flex;
+  flex-direction: column;
 }
 
 .property-label {
   display: block;
   font-size: 12px;
   color: var(--fontColor);
+  margin-bottom: 2px;
 }
 
 .property-input {
   width: calc(100% - 10px);
+  min-height: 50px;
   border: 1px solid var(--borderColor);
   border-radius: 4px;
   background: var(--backgroundColor);
@@ -1169,6 +1021,8 @@
   font-size: 14px;
   margin: 0px;
   padding: 4px;
+  resize: vertical;
+  font-family: inherit;
 }
 
 .property-date-input {
@@ -1233,15 +1087,13 @@
 }
 
 .color-input {
-  width: calc(100% - 4px);
+  width: calc(100% - 0px);
   height: 32px;
   border: 1px solid var(--borderColor);
   border-radius: 4px;
   background: var(--backgroundColor);
   cursor: pointer;
   margin: 0px;
-  margin-top: 4px;
-  padding: 2px;
 }
 
 .property-btn {
@@ -1273,6 +1125,7 @@
   color: var(--fontColor);
   opacity: 0.5;
   text-align: center;
+  padding: 40px;
 }
 
 .empty-state.full-size {
@@ -1293,14 +1146,37 @@
 .empty-hint {
   font-size: 12px;
   margin-top: 8px;
+  opacity: 0.7;
+}
+
+/* ========== 滚动条样式 ========== */
+.scoll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scoll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scoll::-webkit-scrollbar-thumb {
+  background: var(--borderColor);
+  border-radius: 3px;
+}
+
+.scoll::-webkit-scrollbar-thumb:hover {
+  background: var(--fontActiveColor);
 }
 </style>
 
 <script setup lang="ts">
-import {ref, computed, watch, onMounted, onBeforeUnmount, nextTick} from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { usestore } from '../../store/index'
 import draggable from 'vuedraggable'
 import TreeNode from './TreeNode.vue'
 import DataSet from './DataSet.vue'
+
+const store = usestore()
 
 // 类型定义
 type ViewMode = 'waterfall' | 'tree' | 'week' | 'month';
@@ -1309,6 +1185,7 @@ type ItemStatus = '灵感' | '规划' | '待办' | '进行中' | '已完成';
 interface Item {
   id: number;
   title: string;
+  content?: string;
   status: ItemStatus;
   createdTime: Date;
   startTime?: Date;
@@ -1319,6 +1196,8 @@ interface Item {
   expanded?: boolean;
   relatedId?: number;
   _order?: number;
+  filePath?: string;
+  isFolder?: boolean;
 }
 
 // 视图配置
@@ -1346,15 +1225,16 @@ const weekDays = ref([]) as any;
 const allItems = ref<Item[]>([]);
 const nextId = ref(1);
 const selectedItem = ref<Item | null>(null);
-const selectedStatuses = ref<string[]>([]); // 改为数组，支持多选
+const selectedStatuses = ref<string[]>([]);
 const searchText = ref('');
+const workspacePath = ref<string>('');
+const showDataSet = ref(false);
 
 // UI状态
 const waterfallGrid = ref<HTMLElement | null>(null);
 const waterfallLayout = ref<'masonry' | 'list'>('masonry');
 const columnCount = ref(3);
 const columnItems = ref<Array<{index: number, items: Item[]}>>([]);
-const showDataSet = ref(false);
 
 // 颜色选项
 const colorOptions = ref([
@@ -1363,32 +1243,33 @@ const colorOptions = ref([
   '#FD79A8', '#00B894', '#e9ecef', '#cce5ff', '#d4edda'
 ]);
 
-// 计算属性 - 修改：为不同视图提供不同的筛选逻辑
+// 保存状态管理
+let lastSavedTitle = '';
+let lastSavedContent = '';
+let hasUnsavedChanges = false;
+
+// 计算属性 - 筛选项目
 const filteredItems = computed(() => {
-  if (!allItems.value) return [];
+  if (!allItems.value.length) return [];
   
   let result = allItems.value;
   
-  // 按状态筛选（多选）
   if (selectedStatuses.value.length > 0) {
     result = result.filter((item: Item) => selectedStatuses.value.includes(item.status));
   }
   
-  // 按搜索词筛选
   if (searchText.value) {
     const searchTerm = searchText.value.toLowerCase();
     result = result.filter((item: Item) => 
-      item.title?.toLowerCase().includes(searchTerm)
+      item.title?.toLowerCase().includes(searchTerm) ||
+      item.content?.toLowerCase().includes(searchTerm)
     );
   }
   
-  // 排序逻辑
   return result.sort((a: Item, b: Item) => {
     if (currentView.value === 'waterfall' || currentView.value === 'tree') {
-      // 瀑布流和树状图按创建时间倒序
       return new Date(b.createdTime).getTime() - new Date(a.createdTime).getTime();
     } else {
-      // 月视图和周视图按开始时间正序
       const aStart = a.startTime ? new Date(a.startTime).getTime() : 0;
       const bStart = b.startTime ? new Date(b.startTime).getTime() : 0;
       return aStart - bStart;
@@ -1396,7 +1277,7 @@ const filteredItems = computed(() => {
   });
 });
 
-// 专门为周视图计算的筛选项目
+// 周视图筛选项目
 const filteredWeekItems = computed(() => {
   const selected = new Date(selectedDate.value);
   selected.setHours(0, 0, 0, 0);
@@ -1412,20 +1293,18 @@ const filteredWeekItems = computed(() => {
     return selected >= start && selected <= end;
   });
   
-  // 应用状态筛选（多选）
   if (selectedStatuses.value.length > 0) {
     result = result.filter((item: Item) => selectedStatuses.value.includes(item.status));
   }
   
-  // 应用搜索筛选
   if (searchText.value) {
     const searchTerm = searchText.value.toLowerCase();
     result = result.filter((item: Item) => 
-      item.title?.toLowerCase().includes(searchTerm)
+      item.title?.toLowerCase().includes(searchTerm) ||
+      item.content?.toLowerCase().includes(searchTerm)
     );
   }
   
-  // 按开始时间排序
   return result.sort((a: Item, b: Item) => {
     const aStart = a.startTime ? new Date(a.startTime).getTime() : 0;
     const bStart = b.startTime ? new Date(b.startTime).getTime() : 0;
@@ -1433,196 +1312,103 @@ const filteredWeekItems = computed(() => {
   });
 });
 
-// 树状图项目计算 - 只显示规划项目，但应用其他筛选条件
+// 树状图项目计算
 const treeItems = computed({
   get() {
-    // 如果没有状态筛选，则显示所有项目（保持原来的逻辑）
-    if (selectedStatuses.value.length === 0) {
-      // 首先筛选出所有符合条件的项目（根据搜索筛选）
-      let result = allItems.value;
-      
-      // 应用搜索筛选
-      if (searchText.value) {
-        const searchTerm = searchText.value.toLowerCase();
-        result = result.filter((item: Item) => 
-          item.title?.toLowerCase().includes(searchTerm)
-        );
-      }
-      
-      // 构建树状结构：只返回顶级项目，按 _order 字段排序
-      const topItems = result
-        .filter((item: Item) => !item.parentId)
-        .map(item => ({
-          ...item,
-          children: getFilteredChildrenItems(item.id, result)
-        }))
+    if (!allItems.value.length) return [];
+    
+    // 先根据筛选条件过滤项目，但注意：这里需要保持父子关系
+    // 所以我们不能直接过滤，而是需要先找出所有符合条件的项目及其祖先
+    let visibleItems = new Set<number>();
+    
+    if (selectedStatuses.value.length > 0 || searchText.value) {
+      // 找出所有符合条件的项目
+      allItems.value.forEach(item => {
+        const statusMatch = selectedStatuses.value.length === 0 || selectedStatuses.value.includes(item.status);
+        const searchMatch = !searchText.value || 
+          item.title?.toLowerCase().includes(searchText.value.toLowerCase()) ||
+          item.content?.toLowerCase().includes(searchText.value.toLowerCase());
+
+        if (statusMatch && searchMatch) {
+          // 添加这个项目及其所有祖先（显式检查 parentId 是否未定义）
+          let current: Item | undefined = item;
+          while (current) {
+            visibleItems.add(current.id);
+            if (current.parentId !== undefined && current.parentId !== null) {
+              current = allItems.value.find(i => i.id === current!.parentId);
+            } else {
+              break;
+            }
+          }
+        }
+      });
+    }
+    
+    // 构建树结构
+    const buildTreeFromItems = (parentId?: number): Item[] => {
+      return allItems.value
+        .filter(item => {
+          // 过滤父子关系（严格判断 parentId 是否未定义）
+          if (parentId === undefined) {
+            return item.parentId === undefined || item.parentId === null;
+          }
+          return item.parentId === parentId;
+        })
+        .filter(item => {
+          // 如果有筛选条件，只显示可见的项目
+          if (visibleItems.size > 0) {
+            return visibleItems.has(item.id);
+          }
+          return true;
+        })
         .sort((a, b) => {
           const aOrder = a._order !== undefined ? a._order : a.id;
           const bOrder = b._order !== undefined ? b._order : b.id;
           return aOrder - bOrder;
+        })
+        .map(item => {
+          // 递归获取子项
+          const children = buildTreeFromItems(item.id);
+          
+          return {
+            ...item,
+            expanded: item.expanded !== undefined ? item.expanded : true,
+            children: children
+          };
         });
-        
-      return topItems;
-    } 
-    // 如果有状态筛选，需要特殊处理以保持父子关系
-    else {
-      // 步骤1: 找出所有符合筛选状态的项目
-      const filteredItems = allItems.value.filter((item: Item) => 
-        selectedStatuses.value.includes(item.status)
-      );
-      
-      // 步骤2: 找出这些项目的所有祖先（父级、祖父级等）
-      const itemsWithAncestors = new Set<Item>();
-      
-      filteredItems.forEach(item => {
-        // 添加符合条件的项目本身
-        itemsWithAncestors.add(item);
-        
-        // 递归查找并添加所有祖先
-        let parentId = item.parentId;
-        while (parentId) {
-          const parent = allItems.value.find(i => i.id === parentId);
-          if (parent) {
-            itemsWithAncestors.add(parent);
-            parentId = parent.parentId;
-          } else {
-            break;
-          }
-        }
-      });
-      
-      // 步骤3: 从所有祖先中找出顶级项目
-      const topLevelItems = Array.from(itemsWithAncestors).filter(item => 
-        !item.parentId || 
-        !Array.from(itemsWithAncestors).some(parent => parent.id === item.parentId)
-      );
-      
-      // 步骤4: 为每个顶级项目构建完整的树结构
-      const buildTree = (items: Item[]): Item[] => {
-        return items
-          .filter(item => itemsWithAncestors.has(item))
-          .map(item => {
-            // 获取直接子项
-            const children = allItems.value.filter(child => 
-              child.parentId === item.id && itemsWithAncestors.has(child)
-            );
-            
-            return {
-              ...item,
-              children: buildTree(children)
-            };
-          })
-          .sort((a, b) => {
-            const aOrder = a._order !== undefined ? a._order : a.id;
-            const bOrder = b._order !== undefined ? b._order : b.id;
-            return aOrder - bOrder;
-          });
-      };
-      
-      let result = buildTree(topLevelItems);
-      
-      // 应用搜索筛选（如果有）
-      if (searchText.value) {
-        const searchTerm = searchText.value.toLowerCase();
-        const filterTreeBySearch = (items: Item[]): Item[] => {
-          return items
-            .filter(item => item.title?.toLowerCase().includes(searchTerm))
-            .map(item => ({
-              ...item,
-              children: filterTreeBySearch(item.children || [])
-            }))
-            .filter(item => item.title?.toLowerCase().includes(searchTerm) || 
-                           (item.children && item.children.length > 0));
-        };
-        
-        result = filterTreeBySearch(result);
-      }
-      
-      return result;
-    }
+    };
+    
+    return buildTreeFromItems();
   },
   set(newItems: Item[]) {
-    // 更新所有顶级项目的 _order 字段
-    newItems.forEach((item, index) => {
+    // 只在拖拽排序时保存，不保存展开/折叠状态
+    const hasOrderChanged = newItems.some((item, index) => {
       const existingItem = allItems.value.find(i => i.id === item.id);
-      if (existingItem) {
-        existingItem._order = index;
-        existingItem.parentId = undefined;
-      }
+      return existingItem && existingItem._order !== index;
     });
     
-    storeData();
+    if (hasOrderChanged) {
+      newItems.forEach((item, index) => {
+        const existingItem = allItems.value.find(i => i.id === item.id);
+        if (existingItem) {
+          existingItem._order = index;
+          existingItem.parentId = undefined;
+          saveItemToFile(existingItem);
+        }
+      });
+      // 强制刷新
+      allItems.value = [...allItems.value];
+    }
   }
 });
 
-// 获取筛选后的子项（考虑状态筛选和搜索筛选）
-function getFilteredChildrenItems(parentId: number, sourceItems: Item[] = allItems.value): Item[] {
-  // 获取所有子项
-  const children = sourceItems
-    .filter((item: Item) => item.parentId === parentId);
-  
-  // 如果有状态筛选，筛选子项
-  if (selectedStatuses.value.length > 0) {
-    const filteredChildren = children.filter(child => 
-      selectedStatuses.value.includes(child.status) || 
-      // 如果子项本身不符合筛选状态，但它的子项符合，也需要显示
-      hasMatchingDescendants(child.id)
-    );
-    
-    return filteredChildren
-      .sort((a, b) => {
-        const aOrder = a._order !== undefined ? a._order : a.id;
-        const bOrder = b._order !== undefined ? b._order : b.id;
-        return aOrder - bOrder;
-      })
-      .map(child => ({
-        ...child,
-        children: getFilteredChildrenItems(child.id, sourceItems)
-      }));
-  } else {
-    // 没有状态筛选，返回所有子项
-    return children
-      .sort((a, b) => {
-        const aOrder = a._order !== undefined ? a._order : a.id;
-        const bOrder = b._order !== undefined ? b._order : b.id;
-        return aOrder - bOrder;
-      })
-      .map(child => ({
-        ...child,
-        children: getFilteredChildrenItems(child.id, sourceItems)
-      }));
-  }
-}
-
-// 检查项目是否有符合条件的后代
-function hasMatchingDescendants(itemId: number): boolean {
-  // 获取所有子项
-  const children = allItems.value.filter(item => item.parentId === itemId);
-  
-  // 检查直接子项是否符合条件
-  if (children.some(child => selectedStatuses.value.includes(child.status))) {
-    return true;
-  }
-  
-  // 递归检查子项的子项
-  return children.some(child => hasMatchingDescendants(child.id));
-}
-
-const currentYear = computed(() => {
-  return currentDate.value.getFullYear();
-});
-
+// 日期相关计算属性
+const currentYear = computed(() => currentDate.value.getFullYear());
 const currentMonth = computed(() => {
   return currentDate.value.toLocaleString('default', { month: 'long'}) + (' ' + currentYear.value);
 });
-
-const firstDayOfMonth = computed(() => {
-  return new Date(currentYear.value, currentDate.value.getMonth(), 1);
-});
-
-const daysOfWeek = computed(() => {
-  return ['日', '一', '二', '三', '四', '五', '六'];
-});
+const firstDayOfMonth = computed(() => new Date(currentYear.value, currentDate.value.getMonth(), 1));
+const daysOfWeek = computed(() => ['日', '一', '二', '三', '四', '五', '六']);
 
 const dates = computed(() => {
   const datesArr: any[] = [];
@@ -1630,7 +1416,6 @@ const dates = computed(() => {
   const firstDayOfWeek = firstDay.getDay();
   const prevMonthLastDate = new Date(currentYear.value, currentDate.value.getMonth(), 0).getDate();
   
-  // 填充上一个月的日期
   for (let i = firstDayOfWeek - 1; i >= 0; i--) {
     const day = prevMonthLastDate - i;
     const prevMonthDate = new Date(currentYear.value, currentDate.value.getMonth() - 1, day);
@@ -1641,7 +1426,6 @@ const dates = computed(() => {
     });
   }
   
-  // 填充当前月份的日期
   const lastDay = new Date(currentYear.value, currentDate.value.getMonth() + 1, 0);
   const lastDate = lastDay.getDate();
   for (let i = 1; i <= lastDate; i++) {
@@ -1653,7 +1437,6 @@ const dates = computed(() => {
     });
   }
   
-  // 填充下一个月的日期
   const remainingDays = 7 - (datesArr.length % 7);
   if (remainingDays < 7) {
     for (let i = 1; i <= remainingDays; i++) {
@@ -1679,28 +1462,677 @@ const weeks = computed(() => {
 });
 
 const selectedItemTitle = computed({
-  get: () => {
-    if (!selectedItem.value) return '';
-    return selectedItem.value.title;
-  },
+  get: () => selectedItem.value?.title || '',
   set: (value: string) => {
     if (selectedItem.value) {
       selectedItem.value.title = value;
-      updateSelectedItem(selectedItem.value);
     }
   }
 });
 
-// 方法
+// 选中项目的正文内容
+const selectedItemContent = computed({
+  get: () => selectedItem.value?.content || '',
+  set: (value: string) => {
+    if (selectedItem.value) {
+      selectedItem.value.content = value;
+    }
+  }
+});
+
+// ========== 工具栏函数 ==========
+function toggleDataSet() {
+  if (showDataSet.value) {
+    // 关闭 DataSet 前检查是否需要保存
+    saveIfNeeded('关闭DataSet');
+  }
+  showDataSet.value = !showDataSet.value;
+  if (showDataSet.value) {
+    selectedItem.value = null;
+  }
+}
+
+// ========== 路径处理函数 ==========
+
+// 标准化路径
+function normalizePath(filePath: string): string {
+  if (!filePath) return '';
+  
+  let normalized = filePath.replace(/\//g, '\\');
+  normalized = normalized.replace(/^([a-zA-Z]):\\([a-zA-Z]):/, '$1:\\');
+  
+  if (normalized.match(/^[a-zA-Z]:\\[a-zA-Z]:/)) {
+    normalized = normalized.substring(0, 3) + normalized.substring(4);
+  }
+  
+  normalized = normalized.replace(/\\\\+/g, '\\');
+  return normalized;
+}
+
+// 路径拼接
+function pathJoin(...segments: string[]): string {
+  const validSegments = segments.filter(s => s && s.length > 0);
+  if (validSegments.length === 0) return '';
+  
+  let result = validSegments[0];
+  
+  for (let i = 1; i < validSegments.length; i++) {
+    const segment = validSegments[i];
+    
+    if (result.endsWith('/') || result.endsWith('\\')) {
+      result = result.slice(0, -1);
+    }
+    
+    const cleanSegment = segment.startsWith('/') || segment.startsWith('\\') 
+      ? segment.slice(1) 
+      : segment;
+    
+    result = `${result}\\${cleanSegment}`;
+  }
+  
+  if (result.match(/^[a-zA-Z]:\\[a-zA-Z]:/)) {
+    result = result.replace(/^([a-zA-Z]):\\.*/, '$1:\\');
+  }
+  
+  return result;
+}
+
+// ========== 文件系统相关函数 ==========
+
+// 选择工作区
+async function selectWorkspace() {
+  const folderPath = await window.ipcRenderer.invoke('openFolderDialog');
+  if (folderPath) {
+    workspacePath.value = normalizePath(folderPath);
+    await loadWorkspace();
+  }
+}
+
+// 加载工作区
+async function loadWorkspace() {
+  if (!workspacePath.value) return;
+  
+  try {
+    const { fileList, relationList } = await window.ipcRenderer.invoke(
+      'getFilesRelation', 
+      workspacePath.value, 
+      10
+    );
+    
+    const items: Item[] = [];
+    let maxId = 0;
+    
+    for (const file of fileList) {
+      const isFolder = file.type === 'folder';
+      const isReadme = file.label === '.README.md';
+      
+      if (isReadme) continue;
+      
+      let item: Item;
+      
+      if (isFolder) {
+        const readmePath = pathJoin(file.path, '.README.md');
+        const metadata = await getFileMetadata(readmePath);
+        
+        item = {
+          id: file.id,
+          title: file.label,
+          status: metadata?.status || '灵感',
+          createdTime: metadata?.createdTime ? new Date(metadata.createdTime) : new Date(),
+          color: metadata?.color || getRandomColor(),
+          expanded: true,
+          isFolder: true,
+          filePath: normalizePath(file.path)
+        };
+        
+        if (metadata?.startTime) item.startTime = new Date(metadata.startTime);
+        if (metadata?.endTime) item.endTime = new Date(metadata.endTime);
+        if (metadata?.order !== undefined) item._order = metadata.order;
+        
+        // 读取文件夹的正文内容（从 .README.md 中）
+        try {
+          const readmeContent = await window.ipcRenderer.invoke('readFile', readmePath);
+          // 提取 frontmatter 之后的内容
+          const lines = readmeContent.split('\n');
+          let inFrontmatter = false;
+          let frontmatterEnded = false;
+          let contentLines: string[] = [];
+          
+          for (const line of lines) {
+            if (line.trim() === '---' && !inFrontmatter && !frontmatterEnded) {
+              inFrontmatter = true;
+              continue;
+            }
+            if (line.trim() === '---' && inFrontmatter) {
+              inFrontmatter = false;
+              frontmatterEnded = true;
+              continue;
+            }
+            if (!inFrontmatter && frontmatterEnded) {
+              contentLines.push(line);
+            }
+          }
+          
+          item.content = contentLines.join('\n').trim();
+        } catch (error) {
+          console.error(`读取文件夹正文失败: ${readmePath}`, error);
+        }
+        
+      } else {
+        const metadata = await getFileMetadata(file.path);
+        
+        item = {
+          id: file.id,
+          title: file.label.replace(/\.md$/, ''),
+          status: metadata?.status || '灵感',
+          createdTime: metadata?.createdTime ? new Date(metadata.createdTime) : new Date(),
+          color: metadata?.color || getRandomColor(),
+          expanded: true,
+          isFolder: false,
+          filePath: normalizePath(file.path)
+        };
+        
+        if (metadata?.startTime) item.startTime = new Date(metadata.startTime);
+        if (metadata?.endTime) item.endTime = new Date(metadata.endTime);
+        if (metadata?.parentId) item.parentId = metadata.parentId;
+        if (metadata?.order !== undefined) item._order = metadata.order;
+        if (metadata?.relatedId) item.relatedId = metadata.relatedId;
+        
+        // 读取文件的正文内容
+        try {
+          const fileContent = await window.ipcRenderer.invoke('readFile', file.path);
+          // 提取 frontmatter 之后的内容
+          const lines = fileContent.split('\n');
+          let inFrontmatter = false;
+          let frontmatterEnded = false;
+          let contentLines: string[] = [];
+          
+          for (const line of lines) {
+            if (line.trim() === '---' && !inFrontmatter && !frontmatterEnded) {
+              inFrontmatter = true;
+              continue;
+            }
+            if (line.trim() === '---' && inFrontmatter) {
+              inFrontmatter = false;
+              frontmatterEnded = true;
+              continue;
+            }
+            if (!inFrontmatter && frontmatterEnded) {
+              contentLines.push(line);
+            }
+          }
+          
+          item.content = contentLines.join('\n').trim();
+        } catch (error) {
+          console.error(`读取文件正文失败: ${file.path}`, error);
+        }
+      }
+      
+      items.push(item);
+      maxId = Math.max(maxId, file.id);
+    }
+    
+    for (const relation of relationList) {
+      const child = items.find(i => i.id === relation.target);
+      if (child) {
+        child.parentId = relation.source;
+      }
+    }
+    
+    allItems.value = items;
+    nextId.value = maxId + 1;
+    
+    if (currentView.value === 'waterfall') {
+      distributeItemsToColumns();
+    }
+    computer();
+    
+    //console.log(`工作区加载完成，共 ${items.length} 个项目`);
+    
+  } catch (error) {
+    //console.error('加载工作区失败:', error);
+  }
+}
+
+// 获取文件元数据
+async function getFileMetadata(filePath: string): Promise<any> {
+  try {
+    const normalizedPath = normalizePath(filePath);
+    const exists = await fileExists(normalizedPath);
+    if (!exists) return null;
+    
+    const content = await window.ipcRenderer.invoke('readFile', normalizedPath);
+    
+    const match = content.match(/^---\r?\n([\s\S]+?)\r?\n---/);
+    if (match) {
+      try {
+        // 尝试 JSON 解析
+        return JSON.parse('{' + match[1].replace(/(\w+):/g, '"$1":') + '}');
+      } catch {
+        // 简单的 YAML 解析
+        const lines = match[1].split('\n');
+        const result: any = {};
+        for (const line of lines) {
+          const [key, ...valueParts] = line.split(':');
+          if (key && valueParts.length) {
+            const value = valueParts.join(':').trim();
+            if (value === 'true') result[key.trim()] = true;
+            else if (value === 'false') result[key.trim()] = false;
+            else if (!isNaN(Number(value))) result[key.trim()] = Number(value);
+            else result[key.trim()] = value;
+          }
+        }
+        return result;
+      }
+    }
+    return null;
+  } catch (error) {
+    console.error('获取文件元数据失败:', error);
+    return null;
+  }
+}
+
+// 保存项目到文件
+async function saveItemToFile(item: Item) {
+  if (!workspacePath.value) return;
+  
+  try {
+    const isFolder = item.isFolder || (item.children && item.children.length > 0);
+    let filePath = item.filePath ? normalizePath(item.filePath) : '';
+    
+    if (!filePath) {
+      // 新项目，需要创建文件
+      const parentItem = allItems.value.find(i => i.id === item.parentId);
+      
+      // 关键修复：正确获取父路径
+      let parentPath = workspacePath.value;
+      if (parentItem) {
+        // 如果父项目是文件夹，直接使用其路径
+        if (parentItem.isFolder) {
+          parentPath = normalizePath(parentItem.filePath || '');
+        } else {
+          // 如果父项目不是文件夹，获取其所在目录
+          const parentFilePath = parentItem.filePath || '';
+          parentPath = normalizePath(parentFilePath.split(/[/\\]/).slice(0, -1).join('\\'));
+        }
+      }
+      
+      if (isFolder) {
+        // 创建文件夹
+        const folderName = sanitizeFileName(item.title) || '未命名';
+        filePath = pathJoin(parentPath, folderName);
+        filePath = normalizePath(filePath);
+        
+        // 确保父目录存在
+        try {
+          await window.ipcRenderer.invoke('ensureDir', parentPath);
+        } catch (error) {
+          console.error(`创建父目录失败: ${parentPath}`, error);
+        }
+        
+        // 创建文件夹
+        try {
+          await window.ipcRenderer.invoke('ensureDir', filePath);
+        } catch (error) {
+          console.error(`创建文件夹失败: ${filePath}`, error);
+          throw error;
+        }
+        
+        // 创建 .README.md（包含元数据和正文）
+        const readmePath = pathJoin(filePath, '.README.md');
+        await saveContentToFile(readmePath, item);
+        item.filePath = filePath;
+      } else {
+        // 创建 Markdown 文件
+        const fileName = sanitizeFileName(item.title) || '未命名';
+        filePath = pathJoin(parentPath, `${fileName}.md`);
+        filePath = normalizePath(filePath);
+        
+        // 确保父目录存在
+        try {
+          await window.ipcRenderer.invoke('ensureDir', parentPath);
+        } catch (error) {
+          console.error(`创建父目录失败: ${parentPath}`, error);
+        }
+        
+        // 检查文件是否已存在
+        let finalPath = filePath;
+        let counter = 1;
+        while (true) {
+          try {
+            const exists = await fileExists(finalPath);
+            if (!exists) break;
+            finalPath = pathJoin(parentPath, `${fileName}_${counter}.md`);
+            finalPath = normalizePath(finalPath);
+            counter++;
+          } catch {
+            break;
+          }
+        }
+        filePath = finalPath;
+        
+        await saveContentToFile(filePath, item);
+        item.filePath = filePath;
+      }
+    } else {
+      // 更新现有文件
+      if (isFolder) {
+        // 如果是文件夹，先确保文件夹存在
+        try {
+          const folderExists = await fileExists(filePath);
+          if (!folderExists) {
+            console.log(`文件夹不存在，重新创建: ${filePath}`);
+            await window.ipcRenderer.invoke('ensureDir', filePath);
+          }
+        } catch (error) {
+          console.error(`检查文件夹存在性失败: ${filePath}`, error);
+        }
+        
+        // 更新 .README.md（包含元数据和正文）
+        const readmePath = pathJoin(filePath, '.README.md');
+        await saveContentToFile(readmePath, item);
+      } else {
+        // 如果是文件，直接更新
+        const parentDir = filePath.substring(0, filePath.lastIndexOf('\\'));
+        if (parentDir) {
+          try {
+            const dirExists = await fileExists(parentDir);
+            if (!dirExists) {
+              console.log(`父目录不存在，重新创建: ${parentDir}`);
+              await window.ipcRenderer.invoke('ensureDir', parentDir);
+            }
+          } catch (error) {
+            console.error(`检查父目录存在性失败: ${parentDir}`, error);
+          }
+        }
+        
+        // 保存文件内容
+        await saveContentToFile(filePath, item);
+      }
+    }
+    
+    // 如果标题改变，可能需要重命名文件/文件夹
+    const oldPath = item.filePath;
+    if (oldPath) {
+      const oldFileName = oldPath.split(/[/\\]/).pop() || '';
+      const expectedFileName = isFolder 
+        ? sanitizeFileName(item.title)
+        : `${sanitizeFileName(item.title)}.md`;
+      
+      if (oldFileName !== expectedFileName && oldFileName !== '.README.md' && expectedFileName) {
+        const parentPath = oldPath.substring(0, oldPath.lastIndexOf('\\'));
+        if (parentPath) {
+          // 生成不重复的文件名
+          let newPath = normalizePath(pathJoin(parentPath, expectedFileName));
+          let finalPath = newPath;
+          let counter = 1;
+          
+          // 检查是否重名（排除当前文件自身）
+          while (true) {
+            try {
+              const exists = await fileExists(finalPath);
+              // 如果文件不存在，或者存在的是当前文件本身，则可以使用
+              if (!exists || finalPath === oldPath) break;
+              
+              // 生成带数字后缀的新文件名
+              const nameWithoutExt = expectedFileName.replace(/\.md$/, '');
+              finalPath = normalizePath(pathJoin(parentPath, `${nameWithoutExt}_${counter}.md`));
+              counter++;
+            } catch {
+              break;
+            }
+          }
+          
+          // 只有当路径不同时才执行重命名
+          if (finalPath !== oldPath) {
+            try {
+              if (isFolder) {
+                // 创建新文件夹
+                await window.ipcRenderer.invoke('ensureDir', finalPath);
+                
+                // 移动 .README.md
+                const oldReadmePath = pathJoin(oldPath, '.README.md');
+                const newReadmePath = pathJoin(finalPath, '.README.md');
+                
+                try {
+                  const oldReadmeExists = await fileExists(oldReadmePath);
+                  if (oldReadmeExists) {
+                    const content = await window.ipcRenderer.invoke('readFile', oldReadmePath);
+                    await window.ipcRenderer.invoke('writeFile', newReadmePath, content);
+                    await window.ipcRenderer.invoke('deleteFile', oldReadmePath);
+                  }
+                } catch (error) {
+                  console.error('移动 .README.md 失败:', error);
+                }
+                
+                // 移动所有子项目
+                const children = allItems.value.filter(i => i.parentId === item.id);
+                for (const child of children) {
+                  if (child.filePath) {
+                    const childFileName = child.filePath.split(/[/\\]/).pop();
+                    const oldChildPath = child.filePath;
+                    const newChildPath = normalizePath(pathJoin(finalPath, childFileName || ''));
+                    
+                    child.filePath = newChildPath;
+                    
+                    try {
+                      const childExists = await fileExists(oldChildPath);
+                      if (childExists) {
+                        const content = await window.ipcRenderer.invoke('readFile', oldChildPath);
+                        await window.ipcRenderer.invoke('writeFile', newChildPath, content);
+                        await window.ipcRenderer.invoke('deleteFile', oldChildPath);
+                      }
+                    } catch (error) {
+                      console.error(`移动子项目文件失败: ${oldChildPath}`, error);
+                    }
+                    
+                    await saveItemToFile(child);
+                  }
+                }
+                
+                // 删除旧文件夹
+                await deleteFolderRecursive(oldPath);
+                
+              } else {
+                // 移动文件
+                try {
+                  const fileExists_check = await fileExists(oldPath);
+                  if (fileExists_check) {
+                    const content = await window.ipcRenderer.invoke('readFile', oldPath);
+                    await window.ipcRenderer.invoke('writeFile', finalPath, content);
+                    await window.ipcRenderer.invoke('deleteFile', oldPath);
+                  } else {
+                    await saveContentToFile(finalPath, item);
+                  }
+                } catch (error) {
+                  console.error('移动文件失败:', error);
+                }
+              }
+              
+              item.filePath = finalPath;
+              console.log(`文件重命名成功: ${oldPath} -> ${finalPath}`);
+              
+            } catch (error) {
+              console.error('重命名失败:', error);
+            }
+          }
+        }
+      }
+    }
+    
+    console.log(`文件保存完成: ${item.title}`);
+    
+  } catch (error) {
+    console.error(`保存项目 ${item.title} 失败:`, error);
+  }
+}
+
+// 递归删除文件夹
+async function deleteFolderRecursive(folderPath: string) {
+  try {
+    const { fileList } = await window.ipcRenderer.invoke('getFilesRelation', folderPath, 1);
+    
+    for (const file of fileList) {
+      if (file.type === 'file') {
+        try {
+          const fileExists_check = await fileExists(file.path);
+          if (fileExists_check) {
+            await window.ipcRenderer.invoke('deleteFile', file.path);
+          }
+        } catch (error) {
+          console.error(`删除文件失败: ${file.path}`, error);
+        }
+      }
+    }
+    
+    try {
+      const folderExists = await fileExists(folderPath);
+      if (folderExists) {
+        await window.ipcRenderer.invoke('deleteFile', folderPath);
+        console.log(`成功删除文件夹: ${folderPath}`);
+      }
+    } catch (error) {
+      console.error(`删除文件夹失败: ${folderPath}`, error);
+    }
+  } catch (error) {
+    console.error('获取文件夹内容失败:', error);
+  }
+}
+
+// 保存完整内容到文件（包含元数据和正文）
+async function saveContentToFile(filePath: string, item: Item) {
+  const normalizedPath = normalizePath(filePath);
+  
+  const metadata: any = {
+    id: item.id,
+    status: item.status,
+    color: item.color,
+    createdTime: item.createdTime.toISOString()
+  };
+  
+  if (item.startTime) metadata.startTime = item.startTime.toISOString();
+  if (item.endTime) metadata.endTime = item.endTime.toISOString();
+  if (item.parentId) metadata.parentId = item.parentId;
+  if (item._order !== undefined) metadata.order = item._order;
+  if (item.relatedId) metadata.relatedId = item.relatedId;
+  
+  let content = '---\n';
+  for (const [key, value] of Object.entries(metadata)) {
+    content += `${key}: ${value}\n`;
+  }
+  content += '---\n';
+  
+  // 添加正文内容
+  if (item.content && item.content.trim() !== '') {
+    content += '\n' + item.content + '\n';
+  }
+  
+  try {
+    await window.ipcRenderer.invoke('writeFile', normalizedPath, content);
+    console.log(`文件保存成功: ${normalizedPath}`);
+  } catch (error) {
+    console.error(`保存文件失败: ${normalizedPath}`, error);
+    throw error;
+  }
+}
+
+// 重命名文件
+async function renameItemFile(item: Item, newName: string) {
+  if (!item.filePath) return;
+  
+  const parentPath = normalizePath(item.filePath.split(/[/\\]/).slice(0, -1).join('\\'));
+  const newPath = normalizePath(pathJoin(parentPath, newName));
+  
+  try {
+    if (await fileExists(newPath)) {
+      console.warn(`目标文件已存在: ${newPath}`);
+      return;
+    }
+    
+    const content = await window.ipcRenderer.invoke('readFile', item.filePath);
+    await window.ipcRenderer.invoke('writeFile', newPath, content);
+    await window.ipcRenderer.invoke('deleteFile', item.filePath);
+    
+    item.filePath = newPath;
+  } catch (error) {
+    console.error('重命名文件失败:', error);
+  }
+}
+
+// 删除项目文件
+async function deleteItemFile(item: Item) {
+  if (!item.filePath) return;
+  
+  try {
+    const normalizedPath = normalizePath(item.filePath);
+    
+    if (item.isFolder) {
+      console.log(`开始删除文件夹及其内容: ${normalizedPath}`);
+      
+      // 先递归删除所有子项目
+      const children = allItems.value.filter(i => i.parentId === item.id);
+      for (const child of children) {
+        await deleteItemFile(child);
+      }
+      
+      // 删除文件夹内的 .README.md 文件
+      const readmePath = pathJoin(normalizedPath, '.README.md');
+      try {
+        const readmeExists = await fileExists(readmePath);
+        if (readmeExists) {
+          await window.ipcRenderer.invoke('deleteFile', readmePath);
+          console.log(`删除 .README.md 成功: ${readmePath}`);
+        }
+      } catch (error) {
+        console.error(`删除 .README.md 失败: ${readmePath}`, error);
+      }
+      
+      // 删除文件夹本身
+      try {
+        const folderExists = await fileExists(normalizedPath);
+        if (folderExists) {
+          // 注意：这里需要使用专门删除文件夹的方法
+          // 如果 IPC 有删除文件夹的方法，使用它；否则可能需要递归删除
+          await window.ipcRenderer.invoke('deleteFolder', normalizedPath);
+          console.log(`删除文件夹成功: ${normalizedPath}`);
+        }
+      } catch (error) {
+        console.error(`删除文件夹失败: ${normalizedPath}`, error);
+      }
+    } else {
+      // 删除单个文件
+      try {
+        const fileExists_check = await fileExists(normalizedPath);
+        if (fileExists_check) {
+          await window.ipcRenderer.invoke('deleteFile', normalizedPath);
+          console.log(`删除文件成功: ${normalizedPath}`);
+        }
+      } catch (error) {
+        console.error(`删除文件失败: ${normalizedPath}`, error);
+      }
+    }
+  } catch (error) {
+    console.error(`删除项目文件失败: ${item.filePath}`, error);
+  }
+}
+
+// 在文件管理器中打开
+async function openInFolder(item: Item) {
+  if (!item.filePath) return;
+  await window.ipcRenderer.invoke('openInFolder', item.filePath);
+}
+
+// ========== 视图控制函数 ==========
+
 function setCurrentView(view: ViewMode) {
+  // 切换视图前检查是否需要保存
+  saveIfNeeded('切换视图');
   currentView.value = view;
   
-  // 如果是周视图或月视图，更新日期显示
   if (view === 'week' || view === 'month') {
     computer();
   }
   
-  // 如果是瀑布流视图，重新计算布局
   if (view === 'waterfall') {
     nextTick(() => {
       calculateColumnCount();
@@ -1716,32 +2148,21 @@ function getViewIcon() {
 
 function getSearchPlaceholder() {
   switch (currentView.value) {
-    case 'waterfall': return '搜索所有项目...';
-    case 'tree': return '搜索规划项目...';
+    case 'waterfall': return store.locales=='zh'?'搜索所有项目...':'Search all items...';
+    case 'tree': return store.locales=='zh'?'搜索规划项目...':'Search for planned items...';
     case 'week': 
-    case 'month': return '搜索日历项目...';
-    default: return '搜索...';
+    case 'month': return store.locales=='zh'?'搜索日历项目...':'Search calendar items...';
+    default: return store.locales=='zh'?'搜索...':'Search...';
   }
 }
 
-// 切换状态筛选（多选）
 function toggleStatusFilter(status: string) {
   const index = selectedStatuses.value.indexOf(status);
   if (index > -1) {
-    // 如果已经选中，则移除
     selectedStatuses.value.splice(index, 1);
   } else {
-    // 如果未选中，则添加
     selectedStatuses.value.push(status);
   }
-}
-
-// 获取选中的状态标签
-function getSelectedStatusLabels() {
-  return selectedStatuses.value
-    .map(status => statusOptions.find(opt => opt.value === status)?.label)
-    .filter(Boolean)
-    .join(', ');
 }
 
 function getRandomColor() {
@@ -1749,117 +2170,81 @@ function getRandomColor() {
 }
 
 function selectItem(item: Item) {
-  selectedItem.value = item;
+  // 选择新项目前保存当前项目的更改
+  saveIfNeeded('切换项目');
+  
+  if (showDataSet.value) {
+    showDataSet.value = false;
+  }
+  const original = allItems.value.find(i => i.id === item.id);
+  selectedItem.value = original || item;
+  
+  // 当选中项目时，记录当前的值用于后续比较
+  if (selectedItem.value) {
+    lastSavedTitle = selectedItem.value.title;
+    lastSavedContent = selectedItem.value.content || '';
+    hasUnsavedChanges = false;
+  }
 }
 
 function clearSelected() {
+  // 关闭右侧面板前保存更改
+  saveIfNeeded('关闭面板');
   selectedItem.value = null;
+  hasUnsavedChanges = false;
 }
 
-function addItem() {
-  // 如果选择了状态，使用第一个选中的状态作为默认状态
-  const defaultStatus = selectedStatuses.value.length > 0 ? selectedStatuses.value[0] : '灵感';
-  let newItem: Item;
-  
-  const today = new Date();
-  let startTime = new Date(today);
-  let endTime = new Date(today);
-  
-  // 根据当前视图决定是否设置时间
-  if (currentView.value === 'week' || currentView.value === 'month') {
-    // 在月视图或周视图中，如果有选中的日期，使用选中的日期
-    if (selectedDate.value && !isSameDay(selectedDate.value, today)) {
-      startTime = new Date(selectedDate.value);
-      endTime = new Date(selectedDate.value);
-    }
-    
-    newItem = {
-      id: nextId.value++,
-      title: `新的${defaultStatus}`,
-      status: defaultStatus as ItemStatus,
-      createdTime: new Date(),
-      color: getRandomColor(),
-      expanded: true,
-      startTime: startTime,
-      endTime: endTime
-    };
-  } else {
-    // 其他视图中，保持原有逻辑
-    const endDate = new Date(today);
-    endDate.setDate(today.getDate() + 7);
-    
-    newItem = {
-      id: nextId.value++,
-      title: `新的${defaultStatus}`,
-      status: defaultStatus as ItemStatus,
-      createdTime: new Date(),
-      color: getRandomColor(),
-      expanded: true
-    };
-    
-    // 为需要时间的状态添加时间信息
-    if (defaultStatus !== '灵感' && defaultStatus !== '规划') {
-      newItem.startTime = today;
-      newItem.endTime = endDate;
-    }
+// 添加项目
+async function addItem() {
+  if (!workspacePath.value) {
+    alert('请先选择工作区');
+    return;
   }
   
-  // 如果是规划项目，设置 _order
+  const defaultStatus = selectedStatuses.value.length > 0 ? selectedStatuses.value[0] : '灵感';
+  const today = new Date();
+  
+  let newItem: Item = {
+    id: nextId.value++,
+    title: `新的${defaultStatus}`,
+    status: defaultStatus as ItemStatus,
+    createdTime: new Date(),
+    color: getRandomColor(),
+    expanded: true,
+    content: ''
+  };
+  
+  if (defaultStatus !== '灵感' && defaultStatus !== '规划') {
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + 7);
+    newItem.startTime = today;
+    newItem.endTime = endDate;
+  }
+  
   if (defaultStatus === '规划') {
     newItem._order = treeItems.value.length;
   }
   
+  if (selectedItem.value) {
+    newItem.parentId = selectedItem.value.id;
+    newItem.isFolder = false;
+  } else {
+    newItem.isFolder = false;
+  }
+  
   allItems.value.push(newItem);
+  
+  await saveItemToFile(newItem);
+  
   selectedItem.value = newItem;
   
-  storeData();
-  
-  // 根据当前视图更新显示
   if (currentView.value === 'waterfall') {
     distributeItemsToColumns();
   }
 }
 
-// 修改：移除瀑布流视图中的状态转换函数调用
-function moveToOrganized(item: Item) {
-  item.status = '规划';
-  item.expanded = true;
-  item.parentId = undefined;
-  
-  // 设置 _order
-  item._order = treeItems.value.length;
-  
-  updateSelectedItem(item);
-  
-  // 如果当前是瀑布流视图，更新显示
-  if (currentView.value === 'waterfall') {
-    distributeItemsToColumns();
-  }
-}
-
-function moveToInspiration(item: Item) {
-  item.status = '灵感';
-  item.parentId = undefined;
-  delete item._order;
-  
-  // 如果有子项，也转为灵感
-  if (hasChildren(item)) {
-    const updateChildrenStatus = (parentId: number) => {
-      const children = allItems.value.filter((i: Item) => i.parentId === parentId);
-      children.forEach((child: Item) => {
-        child.status = '灵感';
-        child.parentId = undefined;
-        delete child._order;
-        updateChildrenStatus(child.id);
-      });
-    };
-    updateChildrenStatus(item.id);
-  }
-  
-  updateSelectedItem(item);
-}
-
-function moveToPending(item: Item) {
+// 移动项目到待办
+async function moveToPending(item: Item) {
   const newItem: Item = {
     id: nextId.value++,
     title: item.title.length > 30 ? item.title.substring(0, 30) + '...' : item.title,
@@ -1868,35 +2253,56 @@ function moveToPending(item: Item) {
     startTime: new Date(),
     endTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     color: item.color || getRandomColor(),
-    relatedId: item.id
+    relatedId: item.id,
+    isFolder: false,
+    content: item.content
   };
   
   allItems.value.push(newItem);
+  await saveItemToFile(newItem);
   
-  // 如果是规划状态，将其状态改为 '已完成' 以从规划列表中移除
   if (item.status === '规划') {
     item.status = '已完成';
+    await saveItemToFile(item);
     
-    // 同时也需要将所有子项的状态改为 已完成
-    const updateChildrenStatus = (parentId: number) => {
+    const updateChildrenStatus = async (parentId: number) => {
       const children = allItems.value.filter((i: Item) => i.parentId === parentId);
-      children.forEach((child: Item) => {
+      for (const child of children) {
         child.status = '已完成';
-        updateChildrenStatus(child.id);
-      });
+        await saveItemToFile(child);
+        await updateChildrenStatus(child.id);
+      }
     };
     
-    updateChildrenStatus(item.id);
-    
-    updateSelectedItem(item);
+    await updateChildrenStatus(item.id);
   }
   
   selectedItem.value = newItem;
-  
-  storeData();
 }
 
-// 其他方法（与原始代码基本保持一致）
+// 移动到灵感
+async function moveToInspiration(item: Item) {
+  item.status = '灵感';
+  item.parentId = undefined;
+  delete item._order;
+  
+  await saveItemToFile(item);
+  
+  const updateChildrenStatus = async (parentId: number) => {
+    const children = allItems.value.filter((i: Item) => i.parentId === parentId);
+    for (const child of children) {
+      child.status = '灵感';
+      child.parentId = undefined;
+      delete child._order;
+      await saveItemToFile(child);
+      await updateChildrenStatus(child.id);
+    }
+  };
+  
+  await updateChildrenStatus(item.id);
+}
+
+// 切换瀑布流布局
 function toggleWaterfallLayout() {
   waterfallLayout.value = waterfallLayout.value === 'masonry' ? 'list' : 'masonry';
 }
@@ -1907,7 +2313,10 @@ function expandAll() {
       item.expanded = true;
     }
   });
-  storeData();
+  // 强制更新树状图
+  if (currentView.value === 'tree') {
+    treeItems.value = [...treeItems.value];
+  }
 }
 
 function collapseAll() {
@@ -1916,7 +2325,9 @@ function collapseAll() {
       item.expanded = false;
     }
   });
-  storeData();
+  if (currentView.value === 'tree') {
+    const newTreeItems = [...treeItems.value];
+  }
 }
 
 function prev() {
@@ -1950,21 +2361,19 @@ function computer() {
       name: getDayName(date.getDay()),
       date: formatDate(date),
       time: date,
-      today: date.getFullYear() === new Date().getFullYear() && 
-             date.getMonth() === new Date().getMonth() && 
-             date.getDate() === new Date().getDate(),
+      today: isToday(date),
       selected: isSameDay(date, selectedDate.value),
       todos: countTodo(date),
     });
   }
 }
 
-function getDayName(dayIndex: any) {
+function getDayName(dayIndex: number) {
   const days = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
   return days[dayIndex];
 }
 
-function formatDate(date: any) {
+function formatDate(date: Date) {
   const month = (date.getMonth() + 1).toString().padStart(2, '0');
   const day = date.getDate().toString().padStart(2, '0');
   return `${month}-${day}`;
@@ -1983,9 +2392,6 @@ function formatDateForDisplay(date: Date | undefined) {
   const d = new Date(date);
   const month = (d.getMonth() + 1).toString().padStart(2, '0');
   const day = d.getDate().toString().padStart(2, '0');
-  // 如果你想显示年份，可以取消注释下面这行
-  // const year = d.getFullYear().toString().substring(2);
-  // return `${year}-${month}-${day}`;
   return `${month}-${day}`;
 }
 
@@ -2032,56 +2438,48 @@ function isSameDay(date1: Date, date2: Date): boolean {
   );
 }
 
-// 修改：countTodo 函数使用筛选后的项目
 function countTodo(date: Date): number {
   let itemsToCount = allItems.value;
   
-  // 应用状态筛选（多选）
   if (selectedStatuses.value.length > 0) {
     itemsToCount = itemsToCount.filter((item: Item) => selectedStatuses.value.includes(item.status));
   }
   
-  // 应用搜索筛选
   if (searchText.value) {
     const searchTerm = searchText.value.toLowerCase();
     itemsToCount = itemsToCount.filter((item: Item) => 
-      item.title?.toLowerCase().includes(searchTerm)
+      item.title?.toLowerCase().includes(searchTerm) ||
+      item.content?.toLowerCase().includes(searchTerm)
     );
   }
   
-  if (itemsToCount.length > 0) {
-    return itemsToCount.filter((item: Item) => {
-      if (!item.startTime || !item.endTime) return false;
-      
-      const taskStart = new Date(item.startTime);
-      const taskEnd = new Date(item.endTime);
-      const checkDate = new Date(date);
-      
-      taskStart.setHours(0, 0, 0, 0);
-      taskEnd.setHours(23, 59, 59, 999);
-      checkDate.setHours(0, 0, 0, 0);
-      
-      return checkDate >= taskStart && checkDate <= taskEnd;
-    }).length;
-  } else {
-    return 0;
-  }
+  return itemsToCount.filter((item: Item) => {
+    if (!item.startTime || !item.endTime) return false;
+    
+    const taskStart = new Date(item.startTime);
+    const taskEnd = new Date(item.endTime);
+    const checkDate = new Date(date);
+    
+    taskStart.setHours(0, 0, 0, 0);
+    taskEnd.setHours(23, 59, 59, 999);
+    checkDate.setHours(0, 0, 0, 0);
+    
+    return checkDate >= taskStart && checkDate <= taskEnd;
+  }).length;
 }
 
-// 修改：getItemsForDate 函数使用筛选后的项目
 function getItemsForDate(date: Date) {
   let itemsToShow = allItems.value;
   
-  // 应用状态筛选（多选）
   if (selectedStatuses.value.length > 0) {
     itemsToShow = itemsToShow.filter((item: Item) => selectedStatuses.value.includes(item.status));
   }
   
-  // 应用搜索筛选
   if (searchText.value) {
     const searchTerm = searchText.value.toLowerCase();
     itemsToShow = itemsToShow.filter((item: Item) => 
-      item.title?.toLowerCase().includes(searchTerm)
+      item.title?.toLowerCase().includes(searchTerm) ||
+      item.content?.toLowerCase().includes(searchTerm)
     );
   }
   
@@ -2186,251 +2584,51 @@ function distributeItemsToColumns() {
   columnItems.value = columns;
 }
 
-function completeItem(item: Item) {
-  const originalItem = allItems.value.find((i: Item) => i.id === item.id);
-  if (originalItem) {
-    originalItem.status = '已完成';
-    storeData();
-  }
+// ========== 保存相关函数 ==========
+
+// 标题输入处理 - 只更新内存，标记有未保存更改
+function onTitleInput(event: Event) {
+  if (!selectedItem.value) return;
+  const target = event.target as HTMLInputElement;
+  selectedItem.value.title = target.value;
+  hasUnsavedChanges = true;
+  console.log(`标题输入: ${target.value} (已标记未保存)`);
 }
 
+// 内容输入处理 - 只更新内存，标记有未保存更改
+function onContentInput(event: Event) {
+  if (!selectedItem.value) return;
+  const target = event.target as HTMLTextAreaElement;
+  selectedItem.value.content = target.value;
+  hasUnsavedChanges = true;
+  console.log(`内容输入: ${target.value.substring(0, 20)}... (已标记未保存)`);
+}
+
+// 焦点离开时保存
+function onBlur() {
+  saveIfNeeded('焦点离开');
+}
+
+// 颜色选择时保存
 function selectColor(color: string, item: Item) {
   if (item) {
     item.color = color;
-    updateSelectedItem(item);
+    hasUnsavedChanges = true;
+    saveIfNeeded('颜色更改');
   }
 }
 
-function updateSelectedItemTitle(event: Event) {
-  if (!selectedItem.value) return;
-  const target = event.target as HTMLInputElement;
-  const value = target.value;
-  
-  selectedItem.value.title = value;
-  updateSelectedItem(selectedItem.value);
-  
-  // 强制重新渲染树状图
-  nextTick(() => {
-    if (currentView.value === 'tree' && treeItems.value) {
-      treeItems.value = JSON.parse(JSON.stringify(treeItems.value));
-    }
-  });
-}
-
+// 状态更改时保存
 function updateItemStatus(event: Event) {
   if (!selectedItem.value) return;
   const target = event.target as HTMLSelectElement;
   selectedItem.value.status = target.value as ItemStatus;
-  updateSelectedItem(selectedItem.value);
+  hasUnsavedChanges = true;
+  saveIfNeeded('状态更改');
 }
 
-function updateSelectedItem(item: Item) {
-  const index = allItems.value.findIndex((i: Item) => i.id === item.id);
-  if (index !== -1) {
-    allItems.value[index] = { ...item };
-    selectedItem.value = { ...item };
-    storeData();
-    computer();
-  }
-}
-
-function addChildItem(parent: Item) {
-  const newItem: Item = {
-    id: nextId.value++,
-    title: '新的子规划',
-    status: '规划',
-    createdTime: new Date(),
-    color: getRandomColor(),
-    parentId: parent.id
-  };
-  
-  allItems.value.push(newItem);
-  
-  parent.expanded = true;
-  updateSelectedItem(parent);
-  
-  storeData();
-}
-
-function deleteItem(item: Item) {
-  // 删除所有子项目
-  const deleteChildren = (parentId: number) => {
-    const children = allItems.value.filter((i: Item) => i.parentId === parentId);
-    children.forEach((child: Item) => {
-      deleteChildren(child.id);
-      const index = allItems.value.findIndex((i: Item) => i.id === child.id);
-      if (index !== -1) {
-        allItems.value.splice(index, 1);
-      }
-    });
-  };
-  
-  deleteChildren(item.id);
-  
-  // 删除项目本身
-  const index = allItems.value.findIndex((i: Item) => i.id === item.id);
-  if (index !== -1) {
-    allItems.value.splice(index, 1);
-  }
-  
-  storeData();
-  if (selectedItem.value && selectedItem.value.id === item.id) {
-    selectedItem.value = null;
-  }
-  
-  distributeItemsToColumns();
-}
-
-function getChildrenItems(parentId: number, filteredItems: Item[] = allItems.value): Item[] {
-  // 直接获取所有子项，按 _order 字段排序，如果没有则按 ID
-  const children = filteredItems
-    .filter((item: Item) => item.parentId === parentId)
-    .sort((a, b) => {
-      const aOrder = a._order !== undefined ? a._order : a.id;
-      const bOrder = b._order !== undefined ? b._order : b.id;
-      return aOrder - bOrder;
-    });
-  
-  // 为每个子项递归获取其子项（使用相同的筛选条件）
-  return children.map(child => {
-    return {
-      ...child,
-      children: getChildrenItems(child.id, filteredItems)
-    };
-  });
-}
-
-function toggleExpand(item: Item) {
-  item.expanded = !item.expanded;
-  updateSelectedItem(item);
-}
-
-function onTopLevelDragEnd(event: any) {
-  if (event.moved) {
-    // 顶级项目之间的顺序变化
-    treeItems.value.forEach((item, index) => {
-      const existingItem = allItems.value.find(i => i.id === item.id);
-      if (existingItem) {
-        existingItem._order = index;
-      }
-    });
-    
-    storeData();
-    
-  } else if (event.added) {
-    // 项目被添加到顶级列表（从子级拖拽到顶层）
-    const { element, newIndex } = event.added;
-    
-    // 找到这个项目
-    const item = allItems.value.find((i: Item) => i.id === element.id);
-    if (item) {
-      // 设置为顶级
-      item.parentId = undefined;
-      
-      // 更新 _order 字段
-      item._order = newIndex;
-      
-      // 重新排序所有顶级项目的 _order
-      const currentTopItems = treeItems.value;
-      currentTopItems.forEach((topItem, index) => {
-        if (topItem.id !== item.id) {
-          const existingItem = allItems.value.find(i => i.id === topItem.id);
-          if (existingItem) {
-            // 调整 _order：如果 index >= newIndex，则加1
-            existingItem._order = index >= newIndex ? index + 1 : index;
-          }
-        }
-      });
-      
-      storeData();
-      
-      // 强制更新 treeItems
-      nextTick(() => {
-        treeItems.value = [...treeItems.value];
-      });
-    }
-  }
-}
-
-function handleItemMoved(payload: { movedItem: Item, newParentId?: number, targetItemId?: number, position?: 'before' | 'after' | 'inside' }) {
-  const movedItem = allItems.value.find((i: Item) => i.id === payload.movedItem.id);
-  if (!movedItem) {
-    return;
-  }
-  
-  // 检查是否是移动到自身（防止循环）
-  if (payload.newParentId === movedItem.id) {
-    return;
-  }
-  
-  // 简单检查：如果新父级是当前项目的子项，则拒绝
-  const isChildOfMovedItem = (parentId: number): boolean => {
-    const children = getChildrenItems(parentId);
-    for (const child of children) {
-      if (child.id === movedItem.id) return true;
-      if (isChildOfMovedItem(child.id)) return true;
-    }
-    return false;
-  };
-  
-  if (payload.newParentId && isChildOfMovedItem(movedItem.id)) {
-    return;
-  }
-  
-  // 保存旧的父级ID
-  const oldParentId = movedItem.parentId;
-  
-  // 根据 position 处理不同的放置位置
-  if (payload.position === 'inside') {
-    // 放入目标节点内部
-    movedItem.parentId = payload.newParentId;
-  } else if (payload.position === 'before' || payload.position === 'after') {
-    // 放在目标节点前面或后面
-    movedItem.parentId = payload.targetItemId ? 
-      allItems.value.find(i => i.id === payload.targetItemId)?.parentId : 
-      undefined;
-  }
-  
-  storeData();
-  
-  // 如果项目从子级移动到顶层，确保它在 treeItems 中
-  if (!movedItem.parentId && oldParentId) {
-    // 添加到顶级时设置 _order
-    movedItem._order = treeItems.value.length;
-    nextTick(() => {
-      treeItems.value = [...treeItems.value];
-    });
-  } else if (movedItem.parentId && !oldParentId) {
-    // 项目从顶级移动到子级，需要从 treeItems 中移除
-    nextTick(() => {
-      treeItems.value = treeItems.value.filter(item => item.id !== movedItem.id);
-    });
-  }
-}
-
-function handleChildrenChanged(payload: { itemId: number, children: Item[] }) {
-  // 更新子项的父级ID
-  payload.children.forEach((child: Item, index: number) => {
-    const childItem = allItems.value.find(i => i.id === child.id);
-    if (childItem) {
-      childItem.parentId = payload.itemId;
-      childItem._order = index;
-    }
-  });
-  
-  storeData();
-}
-
-function formatDateForInput(date: Date | undefined) {
-  if (!date) return '';
-  const d = new Date(date);
-  const year = d.getFullYear();
-  const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  const day = d.getDate().toString().padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function updateStartTime(event: any, item: Item) {
+// 开始时间更改时保存
+async function updateStartTime(event: any, item: Item) {
   if (!event.target.value) return;
   
   const newDate = new Date(event.target.value);
@@ -2446,10 +2644,12 @@ function updateStartTime(event: any, item: Item) {
     if (item.endTime) item.endTime.setHours(17, 0, 0, 0);
   }
   
-  storeData();
+  hasUnsavedChanges = true;
+  saveIfNeeded('开始时间更改');
 }
 
-function updateEndTime(event: any, item: Item) {
+// 结束时间更改时保存
+async function updateEndTime(event: any, item: Item) {
   if (!event.target.value) return;
   
   const newDate = new Date(event.target.value);
@@ -2465,25 +2665,284 @@ function updateEndTime(event: any, item: Item) {
     if (item.startTime) item.startTime.setHours(9, 0, 0, 0);
   }
   
-  storeData();
+  hasUnsavedChanges = true;
+  saveIfNeeded('结束时间更改');
 }
 
-function hasChildren(item: Item): boolean {
-  if (!item) return false;
+// 如果需要则保存（检查是否有未保存更改）
+async function saveIfNeeded(reason: string = '') {
+  if (!selectedItem.value) return;
   
-  // 首先检查 item 本身是否有 children 属性
-  if (item.children && item.children.length > 0) {
-    return true;
+  const hasTitleChanged = selectedItem.value.title !== lastSavedTitle;
+  const hasContentChanged = selectedItem.value.content !== lastSavedContent;
+  
+  if (hasUnsavedChanges || hasTitleChanged || hasContentChanged) {
+    console.log(`保存项目 (${reason}): ${selectedItem.value.title}`);
+    
+    // 更新最后保存的记录
+    lastSavedTitle = selectedItem.value.title;
+    lastSavedContent = selectedItem.value.content || '';
+    hasUnsavedChanges = false;
+    
+    // 调用更新函数
+    await updateSelectedItem(selectedItem.value);
+  } else {
+    console.log(`跳过保存 (${reason}): 无变化`);
+  }
+}
+
+// 更新项目
+async function updateSelectedItem(item: Item) {
+  const index = allItems.value.findIndex((i: Item) => i.id === item.id);
+  if (index !== -1) {
+    // 先更新数组中的项目
+    allItems.value[index] = { ...item };
+    
+    // 更新选中的项目引用
+    if (selectedItem.value && selectedItem.value.id === item.id) {
+      selectedItem.value = allItems.value[index];
+    }
+    
+    // 保存到文件系统
+    await saveItemToFile(allItems.value[index]);
+    
+    // 重新计算视图
+    computer();
+    
+    console.log(`项目已更新并保存: ${item.title}`);
+  }
+}
+
+// 添加子项目
+async function addChildItem(parent: Item) {
+  const newItem: Item = {
+    id: nextId.value++,
+    title: '新的子规划',
+    status: '规划',
+    createdTime: new Date(),
+    color: getRandomColor(),
+    parentId: parent.id,
+    isFolder: false,
+    expanded: true,
+    content: ''
+  };
+  
+  allItems.value.push(newItem);
+  
+  if (!parent.isFolder) {
+    parent.isFolder = true;
+    
+    if (parent.filePath) {
+      const oldPath = parent.filePath;
+      if (oldPath.endsWith('.md')) {
+        // 将 .md 文件转换为文件夹
+        const folderPath = normalizePath(oldPath.replace(/\.md$/, ''));
+        
+        try {
+          // 确保创建新文件夹
+          await window.ipcRenderer.invoke('ensureDir', folderPath);
+          
+          // 移动原文件内容到 .README.md
+          const readmePath = pathJoin(folderPath, '.README.md');
+          const content = await window.ipcRenderer.invoke('readFile', oldPath);
+          await window.ipcRenderer.invoke('writeFile', readmePath, content);
+          
+          // 删除原文件
+          await window.ipcRenderer.invoke('deleteFile', oldPath);
+          
+          // 更新父项目路径为文件夹路径
+          parent.filePath = folderPath;
+          await saveContentToFile(readmePath, parent);
+          
+          console.log(`成功将文件转换为文件夹: ${oldPath} -> ${folderPath}`);
+        } catch (error) {
+          console.error('转换文件夹失败:', error);
+          parent.isFolder = false;
+          return;
+        }
+      }
+    }
   }
   
-  // 如果没有 children 属性，检查 allItems 中是否有 parentId 等于当前 item.id 的项目
-  const childItems = allItems.value.filter((i: Item) => i.parentId === item.id);
-  return childItems.length > 0;
+  // 确保父文件夹存在
+  if (parent.filePath) {
+    const parentExists = await fileExists(parent.filePath);
+    if (!parentExists) {
+      console.warn(`父文件夹不存在，重新创建: ${parent.filePath}`);
+      await window.ipcRenderer.invoke('ensureDir', parent.filePath);
+      
+      const readmePath = pathJoin(parent.filePath, '.README.md');
+      await saveContentToFile(readmePath, parent);
+    }
+  }
+  
+  // 先保存父项目，确保文件夹存在
+  await saveItemToFile(parent);
+  
+  // 然后再保存子项目
+  await saveItemToFile(newItem);
+  
+  parent.expanded = true;
 }
 
-function handleScroll(event: Event) {
-  // 可以添加无限滚动逻辑
+// 删除项目
+async function deleteItem(item: Item) {
+  // 递归删除子项目
+  const deleteChildren = async (parentId: number) => {
+    const children = allItems.value.filter((i: Item) => i.parentId === parentId);
+    for (const child of children) {
+      await deleteChildren(child.id);
+      const index = allItems.value.findIndex((i: Item) => i.id === child.id);
+      if (index !== -1) {
+        allItems.value.splice(index, 1);
+      }
+      // 删除子项目的文件
+      await deleteItemFile(child);
+    }
+  };
+  
+  // 先删除所有子项目
+  await deleteChildren(item.id);
+  
+  // 再删除当前项目
+  const index = allItems.value.findIndex((i: Item) => i.id === item.id);
+  if (index !== -1) {
+    allItems.value.splice(index, 1);
+    // 删除当前项目的文件/文件夹
+    await deleteItemFile(item);
+  }
+  
+  // 如果删除的是当前选中的项目，清除选中状态
+  if (selectedItem.value && selectedItem.value.id === item.id) {
+    selectedItem.value = null;
+  }
+  
+  // 刷新瀑布流视图
+  distributeItemsToColumns();
+  
+  console.log(`项目删除完成: ${item.title}`);
 }
+
+function toggleExpand(item: Item) {
+  if (!item) return;
+  
+  const existing = allItems.value.find(i => i.id === item.id);
+  if (existing) {
+    existing.expanded = !existing.expanded;
+  } else {
+    item.expanded = !item.expanded;
+  }
+
+  if (currentView.value === 'tree') {
+    allItems.value = [...allItems.value];
+  }
+}
+
+// 处理顶级拖拽
+async function onTopLevelDragEnd(event: any) {
+  if (event.moved) {
+    for (let i = 0; i < treeItems.value.length; i++) {
+      const item = treeItems.value[i];
+      const existingItem = allItems.value.find(e => e.id === item.id);
+      if (existingItem) {
+        existingItem._order = i;
+        await saveItemToFile(existingItem);
+      }
+    }
+  } else if (event.added) {
+    const { element, newIndex } = event.added;
+    const item = allItems.value.find((i: Item) => i.id === element.id);
+    
+    if (item) {
+      item.parentId = undefined;
+      item._order = newIndex;
+      await saveItemToFile(item);
+      
+      const currentTopItems = treeItems.value;
+      for (let i = 0; i < currentTopItems.length; i++) {
+        const topItem = currentTopItems[i];
+        if (topItem.id !== item.id) {
+          const existingItem = allItems.value.find(e => e.id === topItem.id);
+          if (existingItem) {
+            existingItem._order = i >= newIndex ? i + 1 : i;
+            await saveItemToFile(existingItem);
+          }
+        }
+      }
+      
+      nextTick(() => {
+        treeItems.value = [...treeItems.value];
+      });
+    }
+  }
+}
+
+// 处理项目移动
+async function handleItemMoved(payload: { movedItem: Item, newParentId?: number, targetItemId?: number, position?: 'before' | 'after' | 'inside' }) {
+  const movedItem = allItems.value.find((i: Item) => i.id === payload.movedItem.id);
+  if (!movedItem) return;
+  
+  if (payload.newParentId === movedItem.id) return;
+  
+  const isChildOfMovedItem = (parentId: number): boolean => {
+    const children = allItems.value.filter(i => i.parentId === parentId);
+    for (const child of children) {
+      if (child.id === movedItem.id) return true;
+      if (isChildOfMovedItem(child.id)) return true;
+    }
+    return false;
+  };
+  
+  if (payload.newParentId && isChildOfMovedItem(movedItem.id)) return;
+  
+  const oldParentId = movedItem.parentId;
+  
+  if (payload.position === 'inside') {
+    movedItem.parentId = payload.newParentId;
+  } else if (payload.position === 'before' || payload.position === 'after') {
+    movedItem.parentId = payload.targetItemId ? 
+      allItems.value.find(i => i.id === payload.targetItemId)?.parentId : 
+      undefined;
+  }
+  
+  await saveItemToFile(movedItem);
+  
+  if (!movedItem.parentId && oldParentId) {
+    movedItem._order = treeItems.value.length;
+    await saveItemToFile(movedItem);
+    nextTick(() => {
+      treeItems.value = [...treeItems.value];
+    });
+  } else if (movedItem.parentId && !oldParentId) {
+    nextTick(() => {
+      treeItems.value = treeItems.value.filter(item => item.id !== movedItem.id);
+    });
+  }
+}
+
+// 处理子项目变化
+async function handleChildrenChanged(payload: { itemId: number, children: Item[] }) {
+  for (let i = 0; i < payload.children.length; i++) {
+    const child = payload.children[i];
+    const childItem = allItems.value.find(c => c.id === child.id);
+    if (childItem) {
+      childItem.parentId = payload.itemId;
+      childItem._order = i;
+      await saveItemToFile(childItem);
+    }
+  }
+}
+
+function formatDateForInput(date: Date | undefined) {
+  if (!date) return '';
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = (d.getMonth() + 1).toString().padStart(2, '0');
+  const day = d.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function handleScroll(event: Event) {}
 
 function getStatusIcon(status: ItemStatus): string {
   const statusIcons: Record<ItemStatus, string> = {
@@ -2496,66 +2955,94 @@ function getStatusIcon(status: ItemStatus): string {
   return statusIcons[status] || 'fa fa-circle';
 }
 
-async function storeData() {
+// 检查文件是否存在
+async function fileExists(filePath: string): Promise<boolean> {
+  if (!filePath) return false;
+  
   try {
-    localStorage.setItem('items', JSON.stringify(allItems.value));
-    localStorage.setItem('nextId', nextId.value.toString());
-    
-    window.dispatchEvent(new CustomEvent('items-updated'));
-    
-    await nextTick();
-  } catch (error) {
-    console.error('存储数据时出错:', error);
+    const normalizedPath = normalizePath(filePath);
+    const result = await window.ipcRenderer.invoke('getInf', normalizedPath);
+    return result !== null && result !== undefined;
+  } catch (error: any) {
+    if (error.message?.includes('ENOENT') || error.code === 'ENOENT') {
+      return false;
+    }
+    console.error('检查文件存在性时出错:', error);
+    return false;
   }
 }
 
-function getData() {
-  if (localStorage.getItem('items') !== null) {
-    const savedItems = JSON.parse(localStorage.getItem('items')!);
-    
-    allItems.value = savedItems.map((item: any, index: number) => {
-      const itemId = item.id || Date.now() - index;
-      
-      // 兼容性处理
-      let title = item.title || item.content || '未命名项目';
-      
-      return {
-        ...item,
-        id: itemId,
-        title: title,
-        color: item.color || getRandomColor(),
-        createdTime: new Date(item.createdTime),
-        startTime: item.startTime ? new Date(item.startTime) : undefined,
-        endTime: item.endTime ? new Date(item.endTime) : undefined,
-        expanded: item.expanded !== undefined ? item.expanded : true,
-        status: item.status || '灵感'
-      };
-    });
-  } else {
-    allItems.value = [];
-  }
-  
-  // 计算下一个可用的ID
-  if (allItems.value.length > 0) {
-    const maxId = Math.max(...allItems.value.map((i: Item) => i.id));
-    nextId.value = maxId + 1;
-  } else {
-    nextId.value = Date.now();
-  }
-  
-  distributeItemsToColumns();
+// 清理文件名
+function sanitizeFileName(fileName: string): string {
+  if (!fileName) return '';
+  return fileName
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .substring(0, 100);
 }
 
+// 处理数据导入事件
 function handleDataImported(data: any) {
-  getData();
   showDataSet.value = false;
+  if (workspacePath.value) {
+    loadWorkspace();
+  }
 }
 
+// 处理数据清空事件
 function handleDataCleared() {
-  getData();
   showDataSet.value = false;
-  selectedItem.value = null;
+  workspacePath.value = '';
+  allItems.value = [];
+  localStorage.removeItem('workspacePath');
 }
+
+// 处理工作区变化
+function handleWorkspaceChanged(newPath: string) {
+  workspacePath.value = newPath;
+  if (newPath) {
+    loadWorkspace();
+  }
+}
+
+// ========== 生命周期和监听 ==========
+
+watch([filteredItems, columnCount, waterfallLayout], () => {
+  if (currentView.value === 'waterfall') {
+    distributeItemsToColumns();
+  }
+}, { immediate: true, deep: true });
+
+watch(allItems, () => {
+  computer();
+});
+
+watch(selectedItem, (newVal, oldVal) => {
+  if (newVal && (!oldVal || newVal.id !== oldVal.id)) {
+    let parentId = newVal.parentId;
+    while (parentId !== undefined && parentId !== null) {
+      const parent = allItems.value.find(i => i.id === parentId);
+      if (parent) {
+        parent.expanded = true;
+        parentId = parent.parentId;
+      } else {
+        break;
+      }
+    }
+    
+    // 当选中项目变化时，更新最后保存的记录
+    lastSavedTitle = newVal.title;
+    lastSavedContent = newVal.content || '';
+    hasUnsavedChanges = false;
+  }
+});
+
+watch([selectedStatuses, searchText], () => {
+  if (currentView.value === 'week' || currentView.value === 'month') {
+    computer();
+  }
+});
 
 function setupResizeObserver() {
   const resizeObserver = new ResizeObserver(() => {
@@ -2584,65 +3071,27 @@ function setupResizeObserver() {
   };
 }
 
-// 监听器
-watch([filteredItems, columnCount, waterfallLayout], () => {
-  if (currentView.value === 'waterfall') {
-    distributeItemsToColumns();
-  }
-}, { immediate: true, deep: true });
-
-watch(allItems, () => {
-  computer();
-});
-
-watch(showDataSet, (newVal) => {
-  if (newVal) {
-    selectedItem.value = null;
-  }
-});
-
-watch(selectedItem, (newVal) => {
-  if (newVal) {
-    showDataSet.value = false;
-  }
-});
-
-// 监听筛选条件变化，重新计算
-watch([selectedStatuses, searchText], () => {
-  // 强制重新计算各个视图的筛选结果
-  if (currentView.value === 'week' || currentView.value === 'month') {
-    computer();
-  }
-});
-
-// 生命周期
 onMounted(() => {
   nextTick(() => {
-    // 确保所有顶级规划项目都有 _order 字段
-    const topItems = allItems.value
-      .filter((item: Item) => item.status === '规划' && !item.parentId);
-    
-    topItems.forEach((item, index) => {
-      if (item._order === undefined) {
-        item._order = index;
-      }
-    });
-    
-    if (topItems.length > 0) {
-      storeData();
-    }
-    
     setupResizeObserver();
     computer();
+    
+    const savedWorkspace = localStorage.getItem('workspacePath');
+    if (savedWorkspace) {
+      workspacePath.value = savedWorkspace;
+      loadWorkspace();
+    }
   });
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('items-updated', () => {});
-  document.removeEventListener('click', () => {});
+  // 组件卸载前保存当前项目的更改
+  saveIfNeeded('组件卸载');
+  
+  if (workspacePath.value) {
+    localStorage.setItem('workspacePath', workspacePath.value);
+  }
+  
   window.removeEventListener('resize', () => {});
 });
-
-// 初始化
-getData();
 </script>

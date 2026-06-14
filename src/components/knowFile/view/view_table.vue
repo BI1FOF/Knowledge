@@ -1,12 +1,75 @@
 <script setup lang="ts">
   import { usestore } from '../../../store'
-  import {ref, onMounted, watch, nextTick} from 'vue'
+  import {ref, onMounted, watch, nextTick, computed} from 'vue'
   
   const store = usestore()
   let editRowIndex = ref<number | null>(null)
   let editAttributeName = ref<string>('')
   let attributes = ref([]) as any
   let data = ref([]) as any
+  let searchQuery = ref<string>('')
+  
+  const isMarkdownFile = function(item: any): boolean {
+    if (!item) return false
+    
+    // 文件夹也允许编辑（如果需要的话）
+    // if (item.isFolder) return true
+    
+    // 检查文件扩展名
+    const extension = (item.extension || '').toLowerCase()
+    const fileName = (item.label || '').toLowerCase()
+    
+    // Markdown 文件扩展名列表
+    const markdownExtensions = [
+      '.md', '.markdown', '.mdown', '.mkd', 
+      '.mkdn', '.mdwn', '.mdtxt', '.mdtext'
+    ]
+    
+    // 检查扩展名是否匹配
+    return markdownExtensions.some(ext => 
+      extension === ext || fileName.endsWith(ext)
+    )
+  }
+  // 过滤后的数据
+  const filteredData = computed(() => {
+    if (!searchQuery.value.trim()) {
+      return data.value
+    }
+    
+    const query = searchQuery.value.trim().toLowerCase()
+    
+    return data.value.filter((item: any) => {
+      // 搜索文件名
+      if (item.label && item.label.toLowerCase().includes(query)) {
+        return true
+      }
+      
+      // 搜索所有属性值
+      if (item.attributes) {
+        for (const key in item.attributes) {
+          const value = item.attributes[key]
+          if (value !== null && value !== undefined) {
+            const strValue = String(value).toLowerCase()
+            if (strValue.includes(query)) {
+              return true
+            }
+          }
+          // 也搜索属性名
+          if (key.toLowerCase().includes(query)) {
+            return true
+          }
+        }
+      }
+      
+      // 搜索文件路径
+      const filePath = item.fullPath || item.path
+      if (filePath && filePath.toLowerCase().includes(query)) {
+        return true
+      }
+      
+      return false
+    })
+  })
   
   // 初始化数据
   const init = async function(){
@@ -217,7 +280,6 @@
   
   // 保存属性修改
   const saveAttribute = async function(index: number, attribute: string, value: any, inputType?: string){
-    console.log('保存属性开始:', { index, attribute, value, inputType })
     
     const file = data.value[index]
     if (!file) {
@@ -232,16 +294,11 @@
       return
     }
     
-    console.log('文件路径:', filePath)
-    
     try {
-      console.log('准备保存文件:', file.label, '路径:', filePath)
       
       // 根据输入类型规范化值
       const inputTypeToUse = inputType || getInputType(attribute, value)
       const normalizedValue = normalizeValue(value, inputTypeToUse)
-      
-      console.log('规范化后的值:', normalizedValue, '类型:', inputTypeToUse)
       
       // 直接构建配置对象，而不是先获取
       let config: Record<string, any> = {}
@@ -254,19 +311,12 @@
       // 更新配置
       if (normalizedValue === '' || normalizedValue === null || normalizedValue === undefined) {
         delete config[attribute]
-        console.log('删除属性:', attribute)
       } else {
         config[attribute] = normalizedValue
-        console.log('设置属性:', attribute, '=', normalizedValue)
       }
       
-      console.log('最终配置对象:', config)
-      
       // 保存到文件
-      console.log('调用IPC保存文件元数据...')
       const success = await window.ipcRenderer.invoke('saveFileMetadata', filePath, config)
-      
-      console.log('保存结果:', success)
       
       if (success) {
         // 更新本地数据
@@ -317,36 +367,38 @@
       return value ? '✓' : ''
     }
     
-    // 日期格式化
+    // 日期格式化 - 修改为显示完整年月日
     if (value instanceof Date) {
       const year = value.getFullYear()
       const month = ('0' + (value.getMonth() + 1)).slice(-2)
       const day = ('0' + value.getDate()).slice(-2)
       const hours = ('0' + value.getHours()).slice(-2)
       const minutes = ('0' + value.getMinutes()).slice(-2)
-      return `${month}-${day} ${hours}:${minutes}`
+      // 显示格式：YYYY-MM-DD HH:MM
+      return `${year}-${month}-${day} ${hours}:${minutes}`
     }
     
     // 字符串日期处理
     if (typeof value === 'string') {
-      // ISO日期时间格式处理
+      // ISO日期时间格式处理 (如：2022-11-25T14:57:39.000Z)
       if (value.includes('T')) {
         try {
           const date = new Date(value)
+          const year = date.getFullYear()
           const month = ('0' + (date.getMonth() + 1)).slice(-2)
           const day = ('0' + date.getDate()).slice(-2)
           const hours = ('0' + date.getHours()).slice(-2)
           const minutes = ('0' + date.getMinutes()).slice(-2)
-          return `${month}-${day} ${hours}:${minutes}`
+          return `${year}-${month}-${day} ${hours}:${minutes}`
         } catch (e) {
           // 如果解析失败，返回原始值
         }
       }
       
-      // 标准日期格式显示为MM-DD
+      // 标准日期格式显示为 YYYY-MM-DD
       const dateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
       if (dateMatch) {
-        return `${dateMatch[2]}-${dateMatch[3]}`
+        return `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}`
       }
       
       // 时间格式显示
@@ -384,6 +436,14 @@
   
   // 处理单元格点击
   const handleCellClick = async function(index: number, attribute: string, event: MouseEvent){
+    // 检查是否为 markdown 文件
+    const file = data.value[index]
+    if (!isMarkdownFile(file)) {
+      // 非 markdown 文件，禁止编辑
+      event.preventDefault()
+      return
+    }
+    
     // 设置当前编辑的行和属性
     editRowIndex.value = index
     editAttributeName.value = attribute
@@ -487,6 +547,11 @@
     }
   }
   
+  // 清除搜索
+  const clearSearch = function(){
+    searchQuery.value = ''
+  }
+  
   watch(() => store.root, () => {
     init()
   })
@@ -506,7 +571,25 @@
           <i class="fa fa-table"></i>
           {{ store.root == "" ? "根目录" : store.root }}
         </li>
-        
+
+        <!-- 搜索 -->
+        <li class="menu-tools search-container">
+          <div class="search-wrapper">
+            <i class="fa fa-search search-icon"></i>
+            <input 
+              class="search" 
+              v-model="searchQuery"
+              placeholder="搜索文件名或属性..."
+            />
+            <i 
+              v-if="searchQuery" 
+              class="fa fa-times clear-icon" 
+              @click="clearSearch"
+              title="清除搜索"
+            ></i>
+          </div>
+        </li>
+
         <!-- 返回上一级按钮 -->
         <li class="menu-tools">
           <button @click="store.backPath()" title="返回上一级">
@@ -521,6 +604,12 @@
           </button>
         </li>
       </ul>
+    </div>
+    
+    <!-- 搜索结果提示 -->
+    <div v-if="searchQuery && filteredData.length !== data.length" class="search-info">
+      <i class="fa fa-info-circle"></i>
+      找到 {{ filteredData.length }} 条匹配结果（共 {{ data.length }} 条）
     </div>
     
     <!-- 表格内容区域 -->
@@ -540,8 +629,8 @@
         </thead>
         <tbody>
           <tr
-            v-for="(node, index) in data"
-            :key="index"
+            v-for="(node, index) in filteredData"
+            :key="node.fullPath || node.path || index"
             :class="{ 'hover-row': index === editRowIndex }"
           >
             <!-- 序号列 -->
@@ -559,7 +648,7 @@
                   title="打开文件夹"
                 ></i>
                 <i 
-                  class="fa fa-file-text file-icon" 
+                  :class="store.icon(node.extension)" 
                   @click="open(Number(index))"
                   :title="node.isFolder ? '打开文件夹' : '打开文件'"
                 ></i>
@@ -576,6 +665,7 @@
               v-for="(attr, attrIndex) in attributes" 
               :key="attrIndex"
               class="attribute-col"
+              :class="{ 'disabled-cell': !isMarkdownFile(node) }"
               @click="handleCellClick(Number(index), attr, $event)"
             >
               <!-- 只读模式显示 -->
@@ -592,19 +682,20 @@
                   'text-value': getInputType(attr, node.attributes ? node.attributes[attr] : '') === 'text',
                   'empty-value': !(node.attributes && node.attributes[attr]) && node.attributes && node.attributes[attr] !== false && node.attributes && node.attributes[attr] !== 0
                 }"
-                :title="getFullText(node.attributes ? node.attributes[attr] : '')"
+                :title="isMarkdownFile(node) ? getFullText(node.attributes ? node.attributes[attr] : '') : '非Markdown文件，禁止编辑'"
               >
                 <template v-if="node.attributes && node.attributes[attr] !== undefined && node.attributes[attr] !== null && node.attributes[attr] !== ''">
                   {{ formatAttributeDisplay(node.attributes[attr]) }}
                 </template>
                 <template v-else>
-                  <span class="add-hint">点击添加</span>
+                  <span v-if="isMarkdownFile(node)" class="add-hint">点击添加</span>
+                  <span v-else class="disabled-hint">禁止编辑</span>
                 </template>
               </div>
               
-              <!-- 编辑模式输入框 -->
+              <!-- 编辑模式输入框 - 只在 markdown 文件中显示 -->
               <div 
-                v-if="Number(index) === editRowIndex && editAttributeName === attr"
+                v-if="Number(index) === editRowIndex && editAttributeName === attr && isMarkdownFile(node)"
                 class="edit-input"
               >
                 <!-- 复选框 -->
@@ -683,11 +774,12 @@
           </tr>
           
           <!-- 空状态 -->
-          <tr v-if="data.length === 0" class="empty-row">
+          <tr v-if="filteredData.length === 0" class="empty-row">
             <td :colspan="attributes.length + 3" class="empty-cell">
               <div class="empty-state">
                 <i class="fa fa-inbox"></i>
-                <p>暂无数据</p>
+                <p>{{ searchQuery ? '没有找到匹配的结果' : '暂无数据' }}</p>
+                <p v-if="searchQuery" class="search-hint">尝试使用不同的关键词搜索</p>
               </div>
             </td>
           </tr>
@@ -721,7 +813,7 @@
 
 .menu ul {
   margin: 0;
-  padding: 0 10px;
+  padding: 0 5px;
   height: 100%;
   display: flex;
   align-items: center;
@@ -775,6 +867,83 @@
 .menu-tools button:hover {
   background: var(--menuActiveColor);
   border-color: var(--primaryColor);
+}
+
+/* 搜索相关样式 */
+.search-container {
+  flex: 1;
+  max-width: 300px;
+  min-width: 80px;
+}
+
+.search-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.search-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--fontColor);
+  opacity: 0.6;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.search {
+  width: 100%;
+  padding: 4px 28px 4px 26px;
+  border: 1px solid var(--borderColor);
+  border-radius: 4px;
+  background: var(--backgroundColor);
+  color: var(--fontColor);
+  font-size: 12px;
+  outline: none;
+  transition: all 0.2s;
+  box-sizing: border-box;
+  height: 28px;
+}
+
+.search:focus {
+  border-color: var(--primaryColor);
+  box-shadow: 0 0 0 1px rgba(var(--primaryColor-rgb, 0, 123, 255), 0.2);
+}
+
+.search::placeholder {
+  color: var(--borderColor);
+  font-size: 11px;
+}
+
+.clear-icon {
+  position: absolute;
+  right: 8px;
+  color: var(--fontColor);
+  opacity: 0.6;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.clear-icon:hover {
+  opacity: 1;
+  color: var(--primaryColor);
+}
+
+.search-info {
+  padding: 6px 12px;
+  background: rgba(var(--primaryColor-rgb, 0, 123, 255), 0.08);
+  color: var(--primaryColor);
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid rgba(var(--primaryColor-rgb, 0, 123, 255), 0.15);
+}
+
+.search-info i {
+  font-size: 12px;
 }
 
 .tab_content {
@@ -994,7 +1163,14 @@ td {
   height: 100%;
   width: 100%;
 }
-
+.action-buttons i {
+  cursor: pointer;  /* 添加手势图标 */
+  font-size: 14px;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  color: var(--fontColor);
+}
 .folder-icon, .file-icon {
   cursor: pointer;
   font-size: 12px;
@@ -1097,6 +1273,11 @@ td {
   font-size: 12px;
 }
 
+.search-hint {
+  font-size: 11px !important;
+  opacity: 0.7;
+}
+
 .tab_content::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -1113,6 +1294,23 @@ td {
 
 .tab_content::-webkit-scrollbar-thumb:hover {
   background-color: rgba(var(--borderColor-rgb, 128, 128, 128), 0.5);
+}
+
+/* 禁用编辑的单元格样式 */
+.disabled-cell {
+  cursor: not-allowed !important;
+  opacity: 0.7;
+}
+
+.disabled-cell .attribute-value {
+  cursor: not-allowed !important;
+}
+
+.disabled-hint {
+  color: var(--borderColor);
+  font-size: 10px;
+  font-style: italic;
+  opacity: 0.5;
 }
 
 @media (max-width: 768px) {

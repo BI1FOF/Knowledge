@@ -227,32 +227,35 @@
              .attr('y', (d: any) => d.y);
       });
         
-      function dragstarted(event:any) {
+      function dragstarted(event: any) {
         if (!event.active) simulation.alphaTarget(0.1).restart();
-
+        
         // 获取当前的缩放变换
         const transform = d3.zoomTransform(svg.node() as SVGSVGElement);
-        // 将节点的初始位置转换为画布的坐标系统
-        event.subject.fx = (event.subject.x - transform.x) / transform.k;
-        event.subject.fy = (event.subject.y - transform.y) / transform.k;
+        
+        // d3-drag 的坐标已经考虑了缩放，需要转换回原始坐标系
+        // 节点的 fx/fy 应该设置为原始坐标系中的位置
+        event.subject.fx = event.subject.x;
+        event.subject.fy = event.subject.y;
       }
 
       function dragged(event: any) {
         if (event.subject) {
           // 获取当前的缩放变换
           const transform = d3.zoomTransform(svg.node() as SVGSVGElement);
-
-          // 将鼠标坐标转换为画布的坐标系统
-          const x = (event.x - transform.x) / transform.k;
-          const y = (event.y - transform.y) / transform.k;
-
-          // 更新节点的位置
-          event.subject.fx = x;
-          event.subject.fy = y;
+          
+          // 将拖动坐标从缩放坐标系转换回原始坐标系
+          // 使用逆变换：原始坐标 = (缩放坐标 - 平移量) / 缩放比例
+          const originalX = (event.x - transform.x) / transform.k;
+          const originalY = (event.y - transform.y) / transform.k;
+          
+          // 更新节点位置到原始坐标系
+          event.subject.fx = originalX;
+          event.subject.fy = originalY;
         }
       }
 
-      function dragended(event:any) {
+      function dragended(event: any) {
         if (!event.active) simulation.alphaTarget(0);
         if (event.subject) {
           event.subject.fx = null;
@@ -417,8 +420,8 @@ const expandAttribute=async function(indexParam:string|number,state:number){
               title="布局方式"
               class="layout-select"
             >
-              <option value="force">力导向布局</option>
-              <option value="circle">圆形布局</option>
+              <option value="force">{{store.locales=='zh'?"力导向布局":"force"}}</option>
+              <option value="circle">{{store.locales=='zh'?"圆形布局":"circle"}}</option>
             </select>
           </div>
         </li>
@@ -432,11 +435,11 @@ const expandAttribute=async function(indexParam:string|number,state:number){
               title="关联深度"
               class="depth-select"
             >
-              <option value="1">深度1</option>
-              <option value="2">深度2</option>
-              <option value="3">深度3</option>
-              <option value="4">深度4</option>
-              <option value="5">深度5</option>
+              <option value="1">{{store.locales=='zh'?"深度1":"Depth 1"}}</option>
+              <option value="2">{{store.locales=='zh'?"深度2":"Depth 2"}}</option>
+              <option value="3">{{store.locales=='zh'?"深度3":"Depth 3"}}</option>
+              <option value="4">{{store.locales=='zh'?"深度4":"Depth 4"}}</option>
+              <option value="5">{{store.locales=='zh'?"深度5":"Depth 5"}}</option>
             </select>
           </div>
         </li>
@@ -460,7 +463,7 @@ const expandAttribute=async function(indexParam:string|number,state:number){
     <!-- 右侧设置面板 -->
     <div class="panel scoll" v-if="panelType!=''" style="width:230px">
       
-      <div class="scoll" v-if="panelType=='设置'">
+      <div v-if="panelType=='设置'">
         <table>
           <tr v-for="(item,index) in attributes" :key="index" style="text-align: center;">
             <td><i class="fa fa-file-text"></i></td>
@@ -489,6 +492,7 @@ const expandAttribute=async function(indexParam:string|number,state:number){
     overflow: hidden;
     border-right: 1px solid var(--borderColor);
     box-sizing: border-box;
+    position: relative;
   }
   
   #graphContainer{
@@ -512,7 +516,7 @@ const expandAttribute=async function(indexParam:string|number,state:number){
   
   .menu ul {
     margin: 0;
-    padding: 0 10px;
+    padding: 0 5px;
     height: 100%;
     display: flex;
     align-items: center;
@@ -577,7 +581,7 @@ const expandAttribute=async function(indexParam:string|number,state:number){
   .layout-select, .depth-select {
     min-width: 100px;
     height: 28px;
-    padding: 0 8px;
+    padding: 0 5px;
     background-color: var(--menuColor);
     border: 1px solid var(--borderColor);
     border-radius: 4px;
@@ -586,6 +590,7 @@ const expandAttribute=async function(indexParam:string|number,state:number){
     cursor: pointer;
     outline: none;
     transition: all 0.2s;
+    margin: 0px;
   }
   
   .layout-select:hover, .depth-select:hover {

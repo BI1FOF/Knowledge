@@ -1,6 +1,6 @@
 {
   "name": "knowledge",
-  "version": "6.1.25",
+  "version": "6.6.1",
   "main": "dist-electron/main/index.js",
   "description": "AI Knowledge management Software",
   "author": "whl",
@@ -34,7 +34,7 @@
     "compression": "maximum",
     "win": {
       "target": "portable",
-      "icon": "build/icon.ico"
+      "icon": "public/icon.png"
     }
   },
   "devDependencies": {
@@ -71,6 +71,7 @@
     "markmap-view": "^0.17.0",
     "ml-matrix": "^6.12.1",
     "monaco-editor": "^0.50.0",
+    "node-llama-cpp": "^3.18.1",
     "ollama": "^0.6.3",
     "pdfjs-dist": "^4.10.38",
     "pinia": "^2.2.2",

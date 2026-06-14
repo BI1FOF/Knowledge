@@ -10,6 +10,7 @@ export const usestore = defineStore('data', {
     state: () => ({
         root: "" as string, // 仓库位置
         path: "" as string, // 当前路径
+        skillsPath: "" as string, // 技能文件夹路径
         tree: [] as any, // 目录结构
         data: [] as any, // 打开的文件数据
         index: null as any, // 打开的文件序号
@@ -31,9 +32,26 @@ export const usestore = defineStore('data', {
             // 大模型配置
             llm: {
                 // 支持的模型类型
-                types: ['ollama', 'openai', 'deepseek', 'anthropic', 'google', 'azure', 'custom'],
+                types: ['llama','ollama', 'openai', 'deepseek', 'anthropic', 'google', 'azure', 'custom'],
                 type: 'ollama', // 当前使用的类型
-                
+                // llama 配置，使用本地GGUF文件推理
+                llama: {
+                    modelsDir:'', // GGUF 模型文件夹路径
+                    modelPath: '', // GGUF 文件路径
+                    modelName: '', // 模型名称（用于显示）
+                    availableModels: [] as Array<{
+                        name: string;
+                        path: string;
+                    }>, // 可用的 GGUF 模型列表
+                    // llama.cpp 配置参数
+                    contextSize: 8192, // 上下文大小
+                    gpuLayers: 0, // GPU 层数，0表示只用CPU，-1表示自动
+                    threads: 0, // 线程数，0表示自动
+                    temperature: 0.7,
+                    maxTokens: 8192,
+                    topP: 0.9,
+                    topK: 40,
+                },
                 // Ollama 配置
                 ollama: {
                     model_url: 'http://127.0.0.1:11434',
@@ -82,7 +100,7 @@ export const usestore = defineStore('data', {
                 // 通用配置
                 online: false,
                 temperature: 0.7,
-                max_tokens: 6000,
+                max_tokens: 8000,
                 top_p: 1,
                 frequency_penalty: 0,
                 presence_penalty: 0,
@@ -109,24 +127,18 @@ export const usestore = defineStore('data', {
                     voices_url: 'http://localhost:7862/gradio_api/call/update_voices', // 刷新音色API地址
                 }
             },
-            
-            functions: [
-                { title: '正常对话', prompt: '' },
-                { title: '总结', prompt: "请用中文总结以下资料。" },
-                { title: '指导', prompt: "我想了解以下主题，请确定并分享从该主题中学到的最重要的部分。" },
-                { title: '测试', prompt: "我目前正在学习以下主题，问我一系列问题来测试我的知识。找出我答案中的知识空白，并给我更好的答案来填补这些空白。" },
-                { title: '解释', prompt: "用任何初学者都能理解的简单易懂的术语解释以下主题。" },
-                { title: '重写', prompt: "重写下面的文字，让初学者容易理解。" },
-                { title: '续写', prompt: "请根据以下文章进行续写。" },
-                { title: '校对', prompt: "我希望你担任校对员。我将为您提供文本，并希望您检查它们是否有任何拼写、语法或标点符号错误。一旦你完成了对文本的审阅，请向我提供任何必要的更正或建议，以改进文本。" },
-                { title: '评价', prompt: "请用中文评价如下段落，给出总结、评分和修改建议，具体段落如下：" },
-                { title: '翻译为英文', prompt: "请将以下段落翻译为英文，要求逻辑通顺，表达自然。" },
-                { title: '翻译为中文', prompt: "请将以下段落翻译为中文，要求逻辑通顺，表达自然。" },
-            ],
         },
         
         // TTS管理器实例
         ttsManager: null as TTSManager | null,
+        
+        // 多模态支持：存储图片数据
+        imageAttachments: [] as Array<{
+            id: string;
+            data: string | Uint8Array | ArrayBuffer;
+            type: string;
+            name?: string;
+        }>,
     }),
     
     // 计算属性
@@ -170,7 +182,7 @@ export const usestore = defineStore('data', {
                 case 'custom':
                     return !!config.custom.api_key;
                 default:
-                    return false;
+                    return true;
             }
         },
         
@@ -217,6 +229,11 @@ export const usestore = defineStore('data', {
             }
             return [];
         },
+        
+        // 获取图片附件
+        imageAttachmentsCount: (state) => {
+            return state.imageAttachments.length;
+        },
     },
     
     // 方法
@@ -251,6 +268,7 @@ export const usestore = defineStore('data', {
         saveConfig() {
             localStorage.setItem('root', JSON.stringify(this.root))
             localStorage.setItem('path', JSON.stringify(this.path))
+            localStorage.setItem('skillsPath', JSON.stringify(this.skillsPath))
             localStorage.setItem('data', JSON.stringify(this.data))
             localStorage.setItem('index', JSON.stringify(this.index))
             localStorage.setItem('view', JSON.stringify(this.view))
@@ -258,6 +276,7 @@ export const usestore = defineStore('data', {
             localStorage.setItem('locales', JSON.stringify(this.locales))
             localStorage.setItem('AIconfig', JSON.stringify(this.AIconfig))
             localStorage.setItem('UI', JSON.stringify(this.UI))
+            // 注意：图片附件不保存到localStorage，因为可能很大
         },
         
         // 读取配置信息
@@ -267,6 +286,9 @@ export const usestore = defineStore('data', {
             }
             if (localStorage.getItem('path') !== null) {
                 this.path = JSON.parse(localStorage.getItem('path')!)
+            }
+            if (localStorage.getItem('skillsPath') !== null) {
+                this.skillsPath = JSON.parse(localStorage.getItem('skillsPath')!)
             }
             if (localStorage.getItem('data') !== null) {
                 this.data = JSON.parse(localStorage.getItem('data')!)
@@ -284,7 +306,15 @@ export const usestore = defineStore('data', {
                 this.locales = JSON.parse(localStorage.getItem('locales')!)
             }
             if (localStorage.getItem('AIconfig') !== null) {
-                this.AIconfig = JSON.parse(localStorage.getItem('AIconfig')!)
+                // 保存当前选中的模型，避免被覆盖
+                const savedConfig = JSON.parse(localStorage.getItem('AIconfig')!)
+                
+                // 如果是Ollama配置，先保存选中的模型
+                if (savedConfig.llm.type === 'ollama' && savedConfig.llm.ollama.model) {
+                    savedConfig.llm.ollama.model = savedConfig.llm.ollama.model;
+                }
+                
+                this.AIconfig = savedConfig
             }
             if (localStorage.getItem('UI') !== null) {
                 this.UI = JSON.parse(localStorage.getItem('UI')!)
@@ -385,7 +415,7 @@ export const usestore = defineStore('data', {
                 this.UI = {
                     theme: '暖色调',
                     backgroundColor: "#fef6e4",
-                    borderColor: "#f3d2c1",
+                    borderColor: "#ff8a8a",
                     menuColor: "#f2e7d5",
                     menuActiveColor: "#fd6d6d",
                     fontColor: "#172c66",
@@ -423,6 +453,39 @@ export const usestore = defineStore('data', {
                     menuActiveColor: "#4c4c4c",
                     fontColor: "#ffffff",
                     fontActiveColor: "#ffff00",
+                    layout: this.UI.layout
+                }
+            } else if (this.UI.theme == "极简灰") {
+                this.UI = {
+                     theme: '极简灰',
+                    backgroundColor: "#ffffff",
+                    borderColor: "#dddddd",
+                    menuColor: "#f5f5f5",
+                    menuActiveColor: "#e0e0e0",
+                    fontColor: "#333333",
+                    fontActiveColor: "#000000",
+                    layout: this.UI.layout
+                }
+            } else if (this.UI.theme == "暗夜紫") {
+                this.UI = {
+                    theme: '暗夜紫',
+                    backgroundColor: "#1a142b",
+                    borderColor: "#4a3f6e",
+                    menuColor: "#2a1f3a",
+                    menuActiveColor: "#5a4a8a",
+                    fontColor: "#d4c5ff",
+                    fontActiveColor: "#b794f4",
+                    layout: this.UI.layout
+                }
+            } else if (this.UI.theme == "奶茶色") {
+                this.UI = {
+                    theme: '奶茶色',
+                    backgroundColor: "#f9f1e7",
+                    borderColor: "#d9b99b",
+                    menuColor: "#f3e5d5",
+                    menuActiveColor: "#e6c9af",
+                    fontColor: "#6b4f3c",
+                    fontActiveColor: "#aa7a5c",
                     layout: this.UI.layout
                 }
             }
@@ -563,13 +626,55 @@ export const usestore = defineStore('data', {
             const llmConfig = this.AIconfig.llm;
             
             switch (llmConfig.type) {
+                case 'llama':
+                    // 检查本地模型是否存在
+                    const llamaResult = await AIUtils.checkLlamaConnection(this.AIconfig.llm.llama);
+                    this.AIconfig.llm.online = llamaResult.online;
+                    this.AIconfig.llm.llama.availableModels = llamaResult.availableModels;
+                    break;
                 case 'ollama':
+                    // 保存当前选中的模型
+                    const currentModel = llmConfig.ollama.model;
+                    const currentUrl = llmConfig.ollama.model_url;
+                    
+                    // 从localStorage获取保存的模型（始终执行，不判断currentModel是否为空）
+                    let savedModel = null;
+                    try {
+                        const savedConfig = localStorage.getItem('AIconfig');
+                        if (savedConfig) {
+                            const parsed = JSON.parse(savedConfig);
+                            if (parsed.llm?.type === 'ollama' && parsed.llm.ollama?.model) {
+                                savedModel = parsed.llm.ollama.model;
+                            }
+                        }
+                    } catch (e) {
+                        console.error('从localStorage读取模型失败:', e);
+                    }
+                    
                     const ollamaResult = await AIUtils.checkOllamaConnection(llmConfig.ollama);
                     this.AIconfig.llm.online = ollamaResult.online;
                     this.AIconfig.llm.ollama.available_models = ollamaResult.available_models;
-                    if (ollamaResult.model) {
+                    
+                    // 决定要恢复哪个模型：优先顺序：savedModel > currentModel > 默认模型
+                    let modelToRestore = savedModel || currentModel;
+                    
+                    // 重要：恢复之前选中的模型
+                    if (modelToRestore && ollamaResult.available_models.includes(modelToRestore)) {
+                        this.AIconfig.llm.ollama.model = modelToRestore;
+                    } else if (ollamaResult.model) {
+                        // 如果没有选中或选中的模型不可用，使用默认的
                         this.AIconfig.llm.ollama.model = ollamaResult.model;
+                    } else {
+                        this.AIconfig.llm.ollama.model = '';
                     }
+                    
+                    // 恢复URL（防止被覆盖）
+                    if (currentUrl) {
+                        this.AIconfig.llm.ollama.model_url = currentUrl;
+                    }
+                    
+                    // 保存配置
+                    this.saveConfig();
                     break;
                     
                 case 'openai':
@@ -592,11 +697,12 @@ export const usestore = defineStore('data', {
             }
         },
         
-        // 发送消息到AI（统一入口）
-        async sendToAI(messages: any[], functionConfig?: any, options?: {
+        // 发送消息到AI（统一入口）- 支持多模态
+        async sendToAI(messages: any[], options?: {
             onStream?: (chunk: string) => void,
             onComplete?: (content: string) => void,
-            onError?: (error: Error) => void
+            onError?: (error: Error) => void,
+            signal?: AbortSignal  // 添加这一行
         }) {
             const llmConfig = this.AIconfig.llm;
             
@@ -611,8 +717,22 @@ export const usestore = defineStore('data', {
             
             try {
                 switch (llmConfig.type) {
+                    case 'llama':
+                        return await AIUtils.sendToLlama(
+                            this.AIconfig.llm.llama, 
+                            this.AIconfig.llm, 
+                            finalMessages, 
+                            {
+                                ...options,
+                                signal: options?.signal
+                            }
+                        );
                     case 'ollama':
-                        return await AIUtils.sendToOllama(llmConfig.ollama, llmConfig, finalMessages, options);
+                        // 将 signal 传递给 AIUtils.sendToOllama
+                        return await AIUtils.sendToOllama(llmConfig.ollama, llmConfig, finalMessages, {
+                            ...options,
+                            signal: options?.signal
+                        });
                         
                     case 'openai':
                     case 'deepseek':
@@ -642,12 +762,12 @@ export const usestore = defineStore('data', {
             }
         },
         
-        // 发送到OpenAI兼容API
+        // 发送到OpenAI兼容API - 支持多模态
         async sendToOpenAI(messages: any[], options?: any) {
             const openaiConfig = this.AIconfig.llm.openai;
             const llmConfig = this.AIconfig.llm;
             
-            // 构建请求体
+            // 构建请求体，支持多模态
             const requestBody = AIUtils.buildOpenAIRequest(openaiConfig, llmConfig, messages);
             const endpoint = `${openaiConfig.base_url}/v1/chat/completions`;
             const headers = {
@@ -659,16 +779,42 @@ export const usestore = defineStore('data', {
             return AIUtils.makeAPIRequest(endpoint, requestBody, headers, options);
         },
         
-        // 发送到Anthropic Claude
+        // 发送到Anthropic Claude - 支持多模态（Claude 3+支持图片）
         async sendToAnthropic(messages: any[], options?: any) {
             const anthropicConfig = this.AIconfig.llm.anthropic;
             const llmConfig = this.AIconfig.llm;
             
-            // 转换消息格式
-            const anthropicMessages = messages.map(msg => ({
-                role: msg.role === 'assistant' ? 'assistant' : 'user',
-                content: msg.content
-            }));
+            // 转换消息格式，支持多模态
+            const anthropicMessages = messages.map(msg => {
+                const formattedMsg: any = {
+                    role: msg.role === 'assistant' ? 'assistant' : 'user',
+                    content: []
+                };
+                
+                // 添加文本内容
+                if (msg.content) {
+                    formattedMsg.content.push({
+                        type: "text",
+                        text: msg.content
+                    });
+                }
+                
+                // 添加图片内容（如果支持）
+                if (msg.images && msg.images.length > 0) {
+                    msg.images.forEach((image: string) => {
+                        formattedMsg.content.push({
+                            type: "image",
+                            source: {
+                                type: "base64",
+                                media_type: "image/jpeg",
+                                data: image
+                            }
+                        });
+                    });
+                }
+                
+                return formattedMsg;
+            });
             
             const requestBody = {
                 model: anthropicConfig.model,
@@ -689,16 +835,37 @@ export const usestore = defineStore('data', {
             return AIUtils.makeAPIRequest(endpoint, requestBody, headers, options);
         },
         
-        // 发送到Google Gemini
+        // 发送到Google Gemini - 支持多模态
         async sendToGoogle(messages: any[], options?: any) {
             const googleConfig = this.AIconfig.llm.google;
             const llmConfig = this.AIconfig.llm;
             
-            // 转换消息格式
-            const contents = messages.map(msg => ({
-                role: msg.role === 'assistant' ? 'model' : 'user',
-                parts: [{ text: msg.content }]
-            }));
+            // 转换消息格式，支持多模态
+            const contents = messages.map(msg => {
+                const parts: any[] = [];
+                
+                // 添加文本内容
+                if (msg.content) {
+                    parts.push({ text: msg.content });
+                }
+                
+                // 添加图片内容
+                if (msg.images && msg.images.length > 0) {
+                    msg.images.forEach((image: string) => {
+                        parts.push({
+                            inline_data: {
+                                mime_type: "image/jpeg",
+                                data: image
+                            }
+                        });
+                    });
+                }
+                
+                return {
+                    role: msg.role === 'assistant' ? 'model' : 'user',
+                    parts: parts
+                };
+            });
             
             const requestBody = {
                 contents: contents,
@@ -717,11 +884,13 @@ export const usestore = defineStore('data', {
             return AIUtils.makeAPIRequest(endpoint, requestBody, headers, options);
         },
         
-        // 发送到Azure OpenAI
+        // 发送到Azure OpenAI - 支持多模态（如果模型支持）
         async sendToAzure(messages: any[], options?: any) {
             const azureConfig = this.AIconfig.llm.azure;
             const llmConfig = this.AIconfig.llm;
             
+            // Azure OpenAI可能需要不同的格式
+            // 这里简化处理，实际使用时需要根据Azure的文档调整
             const requestBody = {
                 messages: messages,
                 stream: llmConfig.stream,
@@ -741,7 +910,7 @@ export const usestore = defineStore('data', {
             return AIUtils.makeAPIRequest(endpoint, requestBody, headers, options);
         },
         
-        // 发送到自定义API
+        // 发送到自定义API - 支持多模态
         async sendToCustom(messages: any[], options?: any) {
             const customConfig = this.AIconfig.llm.custom;
             const llmConfig = this.AIconfig.llm;
@@ -756,7 +925,7 @@ export const usestore = defineStore('data', {
             let headers;
             
             if (isGLM) {
-                // 智谱API专用格式
+                // 智谱API专用格式 - 需要根据实际情况调整
                 requestBody = {
                     model: customConfig.model || 'glm-4', // 默认使用glm-4
                     messages: messages,
@@ -791,6 +960,76 @@ export const usestore = defineStore('data', {
             }
             
             return AIUtils.makeAPIRequest(endpoint, requestBody, headers, options);
+        },
+        
+        // 多模态相关方法
+        
+        // 添加图片附件
+        async addImageAttachment(file: File | string): Promise<string> {
+            let imageData: string | Uint8Array | ArrayBuffer;
+            let imageType = 'image/jpeg';
+            let imageName = '';
+            
+            if (typeof file === 'string') {
+                // 如果是URL或base64字符串
+                if (file.startsWith('http')) {
+                    imageData = await AIUtils.imageUrlToBase64(file);
+                } else {
+                    imageData = file;
+                }
+                imageName = 'image_' + Date.now() + '.jpg';
+            } else {
+                // 如果是File对象
+                imageData = await AIUtils.imageToBase64(file);
+                imageType = file.type;
+                imageName = file.name;
+            }
+            
+            const id = 'img_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            this.imageAttachments.push({
+                id,
+                data: imageData,
+                type: imageType,
+                name: imageName
+            });
+            
+            return id;
+        },
+        
+        // 移除图片附件
+        removeImageAttachment(id: string) {
+            const index = this.imageAttachments.findIndex(img => img.id === id);
+            if (index !== -1) {
+                this.imageAttachments.splice(index, 1);
+            }
+        },
+        
+        // 清除所有图片附件
+        clearImageAttachments() {
+            this.imageAttachments = [];
+        },
+        
+        // 创建包含图片的消息
+        createImageMessage(role: string, content: string, imageIds?: string[]) {
+            const images: Array<string | Uint8Array> = [];
+            
+            if (imageIds && imageIds.length > 0) {
+                imageIds.forEach(id => {
+                    const attachment = this.imageAttachments.find(img => img.id === id);
+                    if (attachment) {
+                        if (typeof attachment.data === 'string') {
+                            images.push(attachment.data);
+                        } else if (attachment.data instanceof Uint8Array) {
+                            images.push(attachment.data);
+                        } else if (attachment.data instanceof ArrayBuffer) {
+                            images.push(new Uint8Array(attachment.data));
+                        }
+                    }
+                });
+            }
+            
+            return AIUtils.createImageMessage(role, content, images);
         },
         
         copyToClipboard(text: string) {

@@ -33,6 +33,15 @@ export interface FileTemplate {
 // 文件节点处理模式
 export type FileMode = 'full' | 'template'
 
+// 决策分支接口
+export interface DecisionBranch {
+  id: string
+  name: string
+  description: string
+  condition?: string // 规则决策的条件表达式
+  dataTemplate?: string // 传递给下游的数据模板，默认 {input}
+}
+
 // 工作流数据结构接口
 export interface NodeData {
   id: number
@@ -62,19 +71,10 @@ export interface NodeData {
     mode: 'llm' | 'rule'
     prompt?: string
     rules?: string
-    branches: Array<{
-      id: string
-      name: string
-      description: string
-      condition?: string
-    }>
+    branches: DecisionBranch[]
     selectedBranch?: string
   }
-  decisionBranches?: Array<{
-    id: string
-    name: string
-    description: string
-  }>
+  decisionBranches?: DecisionBranch[]
   
   // 知识库节点特有字段
   kbPath?: string
@@ -140,7 +140,7 @@ export interface ExecutionCallback {
   onNodeStart?: (nodeId: number, nodeName: string, nodeType: NodeType) => void
   
   // 节点执行结束
-  onNodeComplete?: (nodeId: number, nodeName: string, nodeType: NodeType, status: 'success' | 'error', result: any) => void
+  onNodeComplete?: (nodeId: number, nodeName: string, nodeType: NodeType, status: NodeData['status'], result: any) => void
   
   // Python节点执行错误
   onPythonError?: (nodeId: number, nodeName: string, error: string, traceback?: string) => void
@@ -161,10 +161,13 @@ export interface ExecutionCallback {
   onLog?: (message: string, level: 'info' | 'warning' | 'error') => void
   
   // 节点状态更新（用于Vue组件响应式更新）
-  onNodeStatusUpdate?: (nodeId: number, status: 'idle' | 'running' | 'success' | 'error', result?: string) => void
+  onNodeStatusUpdate?: (nodeId: number, status: NodeData['status'], result?: string) => void
   
   // 工作流数据保存回调
   onSaveWorkflow?: () => void
+  
+  // 国际化函数
+  t?: (key: string) => string
 }
 
 // 工作流运行器类
@@ -173,21 +176,36 @@ export class WorkflowRunner {
   private store: any
   private callbacks: ExecutionCallback
   private _isRunning: boolean = false
-  private executionOrder: number[] = []
   private currentStep: number = 0
   private abortController: AbortController | null = null
-  private activePath: Set<number> = new Set() // 记录当前活跃的执行路径
   private decisionPaths: Map<number, string> = new Map() // 记录决策节点选中的分支
+  private decisionDataTemplates: Map<number, string> = new Map() // 记录决策节点的数据模板
+  private executionLogs: Array<{message: string, level: 'info' | 'warning' | 'error', timestamp: Date}> = []
+  private executedNodes: Set<number> = new Set() // 记录已执行的节点
+  private nodeExecutionOrder: number[] = [] // 记录节点执行顺序
+  private t: (key: string) => string // 国际化函数
   
   constructor(workflowData: WorkflowData, store: any, callbacks: ExecutionCallback = {}) {
     this.workflowData = workflowData
     this.store = store
     this.callbacks = callbacks
+    // 使用传入的国际化函数或默认返回 key
+    this.t = callbacks.t || ((key: string) => key)
   }
   
   // 获取是否正在运行
   get isRunning(): boolean {
     return this._isRunning
+  }
+  
+  // 获取执行日志
+  get logs(): Array<{message: string, level: 'info' | 'warning' | 'error', timestamp: Date}> {
+    return this.executionLogs
+  }
+  
+  // 获取节点执行顺序
+  get executionOrder(): number[] {
+    return this.nodeExecutionOrder
   }
   
   // 设置工作流数据
@@ -219,6 +237,8 @@ export class WorkflowRunner {
       errors: Array<{nodeId: number, nodeName: string, error: string}>
       decisionPaths: Map<number, string>
       executionTime: number
+      executedNodes: number[]
+      executionOrder: number[]
     }
   }> {
     if (this._isRunning) {
@@ -227,6 +247,12 @@ export class WorkflowRunner {
     
     this._isRunning = true
     this.currentStep = 0
+    this.executionLogs = []
+    this.executedNodes.clear()
+    this.nodeExecutionOrder = []
+    this.decisionPaths.clear()
+    this.decisionDataTemplates.clear()
+    
     const startTime = Date.now()
     const errors: Array<{nodeId: number, nodeName: string, error: string}> = []
     
@@ -236,8 +262,6 @@ export class WorkflowRunner {
     try {
       // 重置所有节点状态
       this.resetNodes()
-      this.activePath.clear()
-      this.decisionPaths.clear()
       
       // 设置起始节点输入（如果提供了）
       if (inputText) {
@@ -251,52 +275,33 @@ export class WorkflowRunner {
         throw new Error('工作流验证失败')
       }
       
-      // 检查循环依赖（考虑决策分支）
+      // 检查循环依赖
       if (this.hasCycleWithDecisions()) {
-        throw new Error('检测到循环依赖（包括决策分支）')
+        throw new Error('检测到循环依赖')
       }
       
-      // 获取拓扑排序执行顺序（考虑决策分支）
-      this.executionOrder = this.getTopologicalOrderWithDecisions()
-      
-      if (this.executionOrder.length === 0) {
-        throw new Error('工作流拓扑排序失败，可能存在循环依赖或无效连接')
+      // 找到开始节点
+      const startNode = this.workflowData.items.find(item => item.type === 'start')
+      if (!startNode) {
+        throw new Error('未找到开始节点')
       }
       
-      this.log(`开始执行工作流，共 ${this.executionOrder.length} 个节点`, 'info')
-      this.callbacks.onProgress?.(0, this.executionOrder.length)
+      this.log('开始执行工作流', 'info')
+      this.callbacks.onProgress?.(0, 100, '准备开始')
       
-      // 按拓扑顺序执行所有节点
-      let completedNodes = 0
+      // 采用智能的拓扑排序+递归依赖检查的方式执行所有必要节点
+      let success = true
+      const executionResult = await this.executeAllReachableNodes(startNode.id)
+      success = executionResult.success
       
-      for (const nodeId of this.executionOrder) {
-        // 检查是否被中止
-        if (this.abortController.signal.aborted) {
-          this.log('工作流执行被中止', 'warning')
-          break
-        }
-        
-        const node = this.workflowData.items.find(item => item.id === nodeId)
-        if (!node) continue
-        
-        // 检查节点是否在活跃路径中（对于决策分支后的节点）
-        if (!this.isNodeInActivePath(nodeId)) {
-          this.log(`跳过节点 ${node.name}，不在当前活跃路径中`, 'info')
-          continue
-        }
-        
-        this.currentStep++
-        completedNodes++
-        
-        this.log(`执行节点: ${node.name} (ID: ${node.id}, 类型: ${node.type})`, 'info')
-        this.callbacks.onNodeStart?.(node.id, node.name, node.type)
-        this.callbacks.onProgress?.(completedNodes, this.executionOrder.length, node.name)
-        
-        // 执行节点
-        const success = await this.executeNode(node.id)
-        
-        if (!success) {
-          const error = node.result ? this.extractErrorFromResult(node.result) : '执行失败'
+      // 计算执行统计
+      const completedNodes = this.workflowData.items.filter(n => n.status === 'success').length
+      const failedNodes = this.workflowData.items.filter(n => n.status === 'error').length
+      
+      // 收集错误信息
+      this.workflowData.items.forEach(node => {
+        if (node.status === 'error') {
+          const error = this.extractErrorFromResult(node.result)
           errors.push({
             nodeId: node.id,
             nodeName: node.name,
@@ -308,23 +313,14 @@ export class WorkflowRunner {
             const errorInfo = this.extractPythonErrorInfo(node.result)
             this.callbacks.onPythonError?.(node.id, node.name, errorInfo.error, errorInfo.traceback)
           }
-          
-          this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
-          
-          // 如果节点执行失败，停止工作流
-          this.log(`节点执行失败: ${node.name} - ${error}`, 'error')
-          break
-        } else {
-          this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
-          this.log(`节点执行成功: ${node.name}`, 'info')
         }
-      }
+      })
       
       // 获取最终结果
-      const endNode = this.workflowData.items.find(item => item.type === 'end')
       let finalResult = ''
       let aggregatedResults: Record<string, any> = {}
       
+      const endNode = this.workflowData.items.find(item => item.type === 'end')
       if (endNode && endNode.status === 'success') {
         try {
           const parsedResult = JSON.parse(endNode.result)
@@ -337,21 +333,23 @@ export class WorkflowRunner {
       
       const executionTime = Date.now() - startTime
       const executionStats = {
-        totalNodes: this.executionOrder.length,
+        totalNodes: this.workflowData.items.length,
         completedNodes: completedNodes,
-        failedNodes: errors.length,
+        failedNodes: failedNodes,
         errors: errors,
         decisionPaths: this.decisionPaths,
-        executionTime: executionTime
+        executionTime: executionTime,
+        executedNodes: Array.from(this.executedNodes),
+        executionOrder: this.nodeExecutionOrder
       }
       
-      const success = errors.length === 0 && completedNodes > 0
+      const overallSuccess = success && failedNodes === 0
       
-      this.log(`工作流执行${success ? '成功' : '失败'}，耗时: ${executionTime}ms`, success ? 'info' : 'error')
-      this.callbacks.onComplete?.(success, finalResult, aggregatedResults)
+      this.log(`工作流执行${overallSuccess ? '成功' : '失败'}，耗时: ${executionTime}ms`, overallSuccess ? 'info' : 'error')
+      this.callbacks.onComplete?.(overallSuccess, finalResult, aggregatedResults)
       
       return {
-        success,
+        success: overallSuccess,
         result: finalResult,
         aggregatedResults,
         executionStats
@@ -365,12 +363,14 @@ export class WorkflowRunner {
         result: `工作流执行失败: ${error.message}`,
         aggregatedResults: {},
         executionStats: {
-          totalNodes: this.executionOrder.length || 0,
+          totalNodes: this.workflowData.items.length,
           completedNodes: this.currentStep,
           failedNodes: errors.length + 1,
           errors: [...errors, {nodeId: -1, nodeName: '系统', error: error.message}],
           decisionPaths: this.decisionPaths,
-          executionTime: Date.now() - startTime
+          executionTime: Date.now() - startTime,
+          executedNodes: Array.from(this.executedNodes),
+          executionOrder: this.nodeExecutionOrder
         }
       }
     } finally {
@@ -379,13 +379,313 @@ export class WorkflowRunner {
     }
   }
   
+  // 执行所有可达节点（包含必要的依赖节点）
+  private async executeAllReachableNodes(startNodeId: number): Promise<{ success: boolean; executedNodes: number[] }> {
+    const executedNodes: number[] = []
+    let success = true
+    
+    // 第一步：使用改进的方法找到所有需要执行的节点（考虑决策路径）
+    const allNodesToExecute = this.getNodesToExecuteWithDecisions(startNodeId)
+    
+    if (allNodesToExecute.length === 0) {
+      this.log('没有找到需要执行的节点', 'warning')
+      return { success: false, executedNodes: [] }
+    }
+    
+    this.log(`总共需要执行 ${allNodesToExecute.length} 个节点`, 'info')
+    
+    // 第二步：获取拓扑排序的执行顺序
+    const executionOrder = this.getTopologicalOrderForNodesWithDecisions(allNodesToExecute)
+    
+    if (executionOrder.length === 0) {
+      this.log('无法确定执行顺序', 'error')
+      return { success: false, executedNodes: [] }
+    }
+    
+    this.log(`执行顺序: ${executionOrder.map(id => {
+      const node = this.workflowData.items.find(n => n.id === id)
+      return node ? `${node.name}(${id})` : `${id}`
+    }).join(' -> ')}`, 'info')
+    
+    // 第三步：按拓扑顺序执行所有节点
+    for (const nodeId of executionOrder) {
+      // 检查是否被中止
+      if (this.abortController?.signal.aborted) {
+        success = false
+        break
+      }
+      
+      // 执行当前节点（包含依赖检查）
+      const nodeSuccess = await this.executeSingleNodeWithDependencies(nodeId)
+      executedNodes.push(nodeId)
+      
+      if (!nodeSuccess) {
+        success = false
+        break
+      }
+    }
+    
+    return { success, executedNodes }
+  }
+  
+  // 获取所有需要执行的节点（考虑决策路径）
+  private getNodesToExecuteWithDecisions(startNodeId: number): number[] {
+    // 使用BFS找到所有可能被执行的节点
+    const allPossibleNodes = new Set<number>()
+    const queue: number[] = [startNodeId]
+    
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!
+      if (allPossibleNodes.has(nodeId)) {
+        continue
+      }
+      
+      allPossibleNodes.add(nodeId)
+      
+      // 获取当前节点的所有后续节点
+      const outgoingLinks = this.workflowData.links.filter(link => link.source === nodeId)
+      
+      // 对于决策节点，我们需要考虑所有分支的后续节点（初步分析阶段）
+      const node = this.workflowData.items.find(item => item.id === nodeId)
+      if (node?.type === 'decision') {
+        // 决策节点：添加所有分支的后续节点（执行时会根据决策结果选择）
+        for (const link of outgoingLinks) {
+          if (!allPossibleNodes.has(link.target)) {
+            queue.push(link.target)
+          }
+        }
+      } else {
+        // 普通节点：添加所有后续节点
+        for (const link of outgoingLinks) {
+          if (!allPossibleNodes.has(link.target)) {
+            queue.push(link.target)
+          }
+        }
+      }
+    }
+    
+    // 现在，根据当前的决策结果（可能为空）过滤节点
+    return this.filterNodesByDecisionPaths(Array.from(allPossibleNodes))
+  }
+  
+  // 根据决策路径过滤节点
+  private filterNodesByDecisionPaths(allPossibleNodes: number[]): number[] {
+    // 如果还没有任何决策结果，返回所有可能的节点
+    if (this.decisionPaths.size === 0) {
+      return allPossibleNodes
+    }
+    
+    // 使用BFS，但根据决策路径进行过滤
+    const reachableNodes = new Set<number>()
+    const startNode = this.workflowData.items.find(item => item.type === 'start')
+    if (!startNode) return []
+    
+    const queue: number[] = [startNode.id]
+    
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!
+      if (reachableNodes.has(nodeId)) {
+        continue
+      }
+      
+      reachableNodes.add(nodeId)
+      const outgoingLinks = this.workflowData.links.filter(link => link.source === nodeId)
+      
+      for (const link of outgoingLinks) {
+        const sourceNode = this.workflowData.items.find(n => n.id === nodeId)
+        
+        // 如果是决策节点的连接，检查是否是被选中的分支
+        if (sourceNode?.type === 'decision' && link.branch) {
+          const selectedBranch = this.decisionPaths.get(nodeId)
+          // 只添加被选中分支的后续节点
+          if (selectedBranch === link.branch) {
+            if (!reachableNodes.has(link.target)) {
+              queue.push(link.target)
+            }
+          }
+          // 如果决策节点还没有执行（selectedBranch为undefined），我们暂时跳过这个连接
+          // 在实际执行时，executeSingleNodeWithDependencies会处理这种情况
+        } else {
+          // 非决策节点或没有分支标记的连接，直接添加
+          if (!reachableNodes.has(link.target)) {
+            queue.push(link.target)
+          }
+        }
+      }
+    }
+    
+    // 只返回既在allPossibleNodes中又在reachableNodes中的节点
+    return Array.from(reachableNodes).filter(nodeId => allPossibleNodes.includes(nodeId))
+  }
+  
+  // 为指定节点集合获取拓扑排序（考虑决策路径）
+  private getTopologicalOrderForNodesWithDecisions(nodeIds: number[]): number[] {
+    if (nodeIds.length === 0) {
+      return []
+    }
+    
+    const indegree: Record<number, number> = {}
+    const adjacencyList: Record<number, number[]> = {}
+    
+    // 初始化
+    nodeIds.forEach(nodeId => {
+      indegree[nodeId] = 0
+      adjacencyList[nodeId] = []
+    })
+    
+    // 只考虑在指定节点集合内的连接
+    this.workflowData.links.forEach(link => {
+      if (nodeIds.includes(link.source) && nodeIds.includes(link.target)) {
+        const sourceNode = this.workflowData.items.find(n => n.id === link.source)
+        
+        // 对于决策节点的连接，检查是否是被选中的分支
+        if (sourceNode?.type === 'decision' && link.branch) {
+          const selectedBranch = this.decisionPaths.get(link.source)
+          // 如果决策结果已知且匹配，或者决策结果未知（执行时会处理），则添加连接
+          if (!selectedBranch || selectedBranch === link.branch) {
+            adjacencyList[link.source].push(link.target)
+            indegree[link.target] = (indegree[link.target] || 0) + 1
+          }
+        } else {
+          // 非决策节点，直接添加
+          adjacencyList[link.source].push(link.target)
+          indegree[link.target] = (indegree[link.target] || 0) + 1
+        }
+      }
+    })
+    
+    // 找到入度为0的节点
+    const queue: number[] = []
+    nodeIds.forEach(nodeId => {
+      if (indegree[nodeId] === 0) {
+        queue.push(nodeId)
+      }
+    })
+    
+    const result: number[] = []
+    
+    while (queue.length > 0) {
+      const nodeId = queue.shift()!
+      result.push(nodeId)
+      
+      const neighbors = adjacencyList[nodeId] || []
+      for (const neighbor of neighbors) {
+        indegree[neighbor]--
+        if (indegree[neighbor] === 0) {
+          queue.push(neighbor)
+        }
+      }
+    }
+    
+    // 检查是否所有节点都被处理
+    if (result.length !== nodeIds.length) {
+      this.log('警告：节点集合中存在循环依赖或决策分支过滤导致节点缺失', 'warning')
+      // 返回能够确定顺序的节点
+    }
+    
+    return result
+  }
+  
+  // 带依赖检查的节点执行 - 修复了决策分支过滤问题
+  private async executeSingleNodeWithDependencies(nodeId: number): Promise<boolean> {
+    const node = this.workflowData.items.find(item => item.id === nodeId)
+    if (!node) return false
+    
+    // 检查节点是否已经执行过
+    if (this.executedNodes.has(nodeId)) {
+      return node.status === 'success'
+    }
+    
+    // 检查是否被中止
+    if (this.abortController?.signal.aborted) {
+      return false
+    }
+    
+    // 开始节点没有前置依赖，可以直接执行
+    if (node.type === 'start') {
+      return await this.executeSingleNode(nodeId)
+    }
+    
+    // 获取所有前置连接
+    const incomingLinks = this.workflowData.links.filter(link => link.target === nodeId)
+    
+    if (incomingLinks.length === 0) {
+      // 没有输入连接的节点可以直接执行
+      return await this.executeSingleNode(nodeId)
+    }
+    
+    // 检查每个前置连接，确保所有必要的前置节点都已执行
+    // 修复：正确处理决策节点的分支连接
+    for (const link of incomingLinks) {
+      const sourceNode = this.workflowData.items.find(n => n.id === link.source)
+      if (!sourceNode) continue
+      
+      // 检查决策节点的分支连接（关键修复）
+      if (link.branch && sourceNode.type === 'decision') {
+        // 如果决策节点还没有执行，先执行它
+        if (!this.executedNodes.has(sourceNode.id)) {
+          const sourceSuccess = await this.executeSingleNodeWithDependencies(sourceNode.id)
+          if (!sourceSuccess) {
+            this.log(`节点 ${node.name} 的前置决策节点 ${sourceNode.name} 执行失败`, 'error')
+            return false
+          }
+        }
+        
+        // 获取决策结果
+        const selectedBranch = this.decisionPaths.get(sourceNode.id)
+        
+        // 关键修复：只有当分支匹配时才需要这个依赖
+        if (selectedBranch !== link.branch) {
+          // 跳过这个连接，因为不是选中的分支
+          // 这意味着当前节点可能还有其他输入连接，继续检查其他连接
+          continue
+        }
+        // 如果分支匹配，继续检查源节点是否已成功执行
+      }
+      
+      // 如果源节点还没有执行，先执行它
+      if (!this.executedNodes.has(link.source)) {
+        const sourceSuccess = await this.executeSingleNodeWithDependencies(link.source)
+        if (!sourceSuccess) {
+          this.log(`节点 ${node.name} 的前置节点 ${sourceNode.name} 执行失败`, 'error')
+          return false
+        }
+      }
+    }
+    
+    // 检查节点是否还有有效的输入连接（对于决策分支过滤后的情况）
+    // 如果节点只有决策节点的分支连接，且所有连接都被跳过，则这个节点不应该执行
+    const hasValidInput = incomingLinks.some(link => {
+      const sourceNode = this.workflowData.items.find(n => n.id === link.source)
+      if (!sourceNode) return false
+      
+      if (link.branch && sourceNode.type === 'decision') {
+        const selectedBranch = this.decisionPaths.get(sourceNode.id)
+        return selectedBranch === link.branch
+      }
+      return true
+    })
+    
+    if (!hasValidInput && incomingLinks.length > 0) {
+      this.log(`节点 ${node.name} 没有有效的输入连接（决策分支不匹配），跳过执行`, 'info')
+      // 标记节点为跳过状态
+      node.status = 'idle'
+      node.result = this.t('node_skipped')
+      this.callbacks.onNodeStatusUpdate?.(node.id, 'idle', node.result)
+      // 虽然跳过，但不视为失败
+      return true
+    }
+    
+    // 所有必要的前置节点都已执行，执行当前节点
+    return await this.executeSingleNode(nodeId)
+  }
+  
   // 停止工作流
   stop(): void {
     if (this.abortController) {
       this.abortController.abort()
     }
     this._isRunning = false
-    this.log('工作流已停止', 'warning')
   }
   
   // 获取当前执行状态
@@ -396,19 +696,17 @@ export class WorkflowRunner {
     currentNode?: string
     progress: number
     activeDecisionPaths: Map<number, string>
+    executionOrder: number[]
   } {
-    const currentNodeId = this.executionOrder[this.currentStep - 1]
-    const currentNode = currentNodeId ? 
-      this.workflowData.items.find(item => item.id === currentNodeId) : undefined
-    
     return {
       isRunning: this._isRunning,
       currentStep: this.currentStep,
-      totalSteps: this.executionOrder.length,
-      currentNode: currentNode?.name,
-      progress: this.executionOrder.length > 0 ? 
-        (this.currentStep / this.executionOrder.length) * 100 : 0,
-      activeDecisionPaths: this.decisionPaths
+      totalSteps: this.workflowData.items.length,
+      currentNode: undefined,
+      progress: this.workflowData.items.length > 0 ? 
+        (this.currentStep / this.workflowData.items.length) * 100 : 0,
+      activeDecisionPaths: this.decisionPaths,
+      executionOrder: this.nodeExecutionOrder
     }
   }
   
@@ -434,23 +732,134 @@ export class WorkflowRunner {
     const node = this.workflowData.items.find(item => item.id === nodeId)
     if (!node) return false
     
-    this.callbacks.onNodeStart?.(node.id, node.name, node.type)
-    
-    const success = await this.executeNode(node.id)
-    
-    if (success) {
-      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
-    } else {
-      const error = this.extractErrorFromResult(node.result)
-      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
-      
-      if (node.type === 'python') {
-        const errorInfo = this.extractPythonErrorInfo(node.result)
-        this.callbacks.onPythonError?.(node.id, node.name, errorInfo.error, errorInfo.traceback)
-      }
+    // 检查节点是否正在运行
+    if (node.status === 'running') {
+      this.log(`节点 ${node.name} 正在运行中，请稍后`, 'warning')
+      return false
     }
     
-    return success
+    // 检查是否被中止
+    if (this.abortController?.signal.aborted) {
+      return false
+    }
+    
+    // 保存原始运行状态
+    const wasRunning = this._isRunning
+    const oldAbortController = this.abortController
+    
+    try {
+      // 临时设置运行状态
+      this._isRunning = true
+      this.abortController = new AbortController()
+      
+      // 更新节点状态为运行中
+      node.status = 'running'
+      this.callbacks.onNodeStatusUpdate?.(node.id, 'running', node.result)
+      this.callbacks.onNodeStart?.(node.id, node.name, node.type)
+      
+      // 直接执行节点逻辑，不经过 executeNode（避免 executedNodes 检查）
+      const success = await this.executeNodeDirect(node)
+      
+      if (success) {
+        // 更新 executedNodes 记录（用于工作流整体运行时的依赖追踪）
+        this.executedNodes.add(nodeId)
+        // 确保节点顺序记录
+        if (!this.nodeExecutionOrder.includes(nodeId)) {
+          this.nodeExecutionOrder.push(nodeId)
+        }
+      }
+      
+      return success
+      
+    } catch (error: any) {
+      node.status = 'error'
+      node.result = JSON.stringify({
+        error: error.message,
+        type: node.type,
+        timestamp: new Date().toISOString()
+      })
+      this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
+      this.callbacks.onSaveWorkflow?.()
+      return false
+      
+    } finally {
+      // 恢复原始运行状态
+      this._isRunning = wasRunning
+      if (oldAbortController) {
+        this.abortController = oldAbortController
+      } else {
+        this.abortController = null
+      }
+    }
+  }
+
+  // 新增：直接执行节点逻辑的方法（不检查 executedNodes）
+  private async executeNodeDirect(node: NodeData): Promise<boolean> {
+    try {
+      let success = false
+      
+      // 执行节点逻辑
+      switch (node.type) {
+        case 'start':
+          success = await this.runStartNode(node)
+          break
+        case 'end':
+          success = await this.runEndNode(node)
+          break
+        case 'reasoning':
+          success = await this.runReasoningNode(node)
+          break
+        case 'decision':
+          success = await this.runDecisionNode(node)
+          break
+        case 'text':
+          success = await this.runTextNode(node)
+          break
+        case 'structured':
+          success = await this.runStructuredNode(node)
+          break
+        case 'webpage':
+          success = await this.runWebpageNode(node)
+          break
+        case 'web':
+          success = await this.runWebNode(node)
+          break
+        case 'local':
+          success = await this.runLocalNode(node)
+          break
+        case 'python':
+          success = await this.runPythonNode(node)
+          break
+        case 'knowledge':
+          success = await this.runKnowledgeNode(node)
+          break
+        case 'mcp':
+          success = await this.runMcpNode(node)
+          break
+        default:
+          throw new Error(`未知节点类型: ${node.type}`)
+      }
+      
+      if (success) {
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
+        this.callbacks.onSaveWorkflow?.()
+      }
+      
+      return success
+      
+    } catch (error: any) {
+      node.status = 'error'
+      node.result = JSON.stringify({
+        error: error.message,
+        type: node.type,
+        timestamp: new Date().toISOString()
+      })
+      this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
+      this.callbacks.onSaveWorkflow?.()
+      return false
+    }
   }
   
   // MCP节点专用方法
@@ -528,13 +937,48 @@ export class WorkflowRunner {
   
   // 私有方法
   private log(message: string, level: 'info' | 'warning' | 'error' = 'info'): void {
+    const logEntry = {
+      message,
+      level,
+      timestamp: new Date()
+    }
+    this.executionLogs.push(logEntry)
+    
     console.log(`[WorkflowRunner ${level.toUpperCase()}] ${message}`)
     this.callbacks.onLog?.(message, level)
   }
   
-  private resetNodes(): void {
+  public resetNodes(): void {
+    // 获取等待状态文本映射
+    const getWaitingText = (type: NodeType): string => {
+      const waitingTextMap: Record<NodeType, string> = {
+        'text': this.t('waiting'),
+        'local': this.t('waiting'),
+        'web': this.t('waiting_search'),
+        'webpage': this.t('waiting_fetch'),
+        'reasoning': this.t('waiting_reasoning'),
+        'decision': this.t('waiting_decision'),
+        'python': this.t('waiting_execute'),
+        'knowledge': this.t('waiting_retrieval'),
+        'structured': this.t('waiting_structured'),
+        'mcp': this.t('waiting'),
+        'start': this.t('waiting_start'),
+        'end': this.t('waiting_end')
+      }
+      return waitingTextMap[type] || this.t('waiting')
+    }
+    
     this.workflowData.items.forEach(node => {
       node.status = 'idle'
+      if (node.type !== 'start' && node.type !== 'end') {
+        node.result = getWaitingText(node.type)
+      }
+      if (node.type === 'start') {
+        node.result = this.t('waiting_start')
+      }
+      if (node.type === 'end') {
+        node.result = this.t('waiting_end')
+      }
       this.callbacks.onNodeStatusUpdate?.(node.id, 'idle', node.result)
     })
   }
@@ -642,100 +1086,21 @@ export class WorkflowRunner {
     return false
   }
   
-  // 获取拓扑排序执行顺序（考虑决策分支）
-  private getTopologicalOrderWithDecisions(): number[] {
-    const indegree: Record<number, number> = {}
-    const adjacencyList: Record<number, Array<{target: number, branch?: string}>> = {}
-    
-    // 初始化
-    this.workflowData.items.forEach(node => {
-      indegree[node.id] = 0
-      adjacencyList[node.id] = []
-    })
-    
-    // 构建邻接表和入度表（考虑决策分支）
-    this.workflowData.links.forEach(link => {
-      adjacencyList[link.source].push({
-        target: link.target,
-        branch: link.branch
-      })
-      indegree[link.target] = (indegree[link.target] || 0) + 1
-    })
-    
-    // 找到入度为0的节点（开始节点）
-    const queue: number[] = []
-    this.workflowData.items.forEach(node => {
-      if (indegree[node.id] === 0) {
-        queue.push(node.id)
-      }
-    })
-    
-    const result: number[] = []
-    
-    while (queue.length > 0) {
-      const nodeId = queue.shift()!
-      result.push(nodeId)
-      
-      const neighbors = adjacencyList[nodeId] || []
-      for (const neighbor of neighbors) {
-        indegree[neighbor.target]--
-        if (indegree[neighbor.target] === 0) {
-          queue.push(neighbor.target)
-        }
-      }
-    }
-    
-    return result
-  }
-  
-  // 检查节点是否在活跃路径中
-  private isNodeInActivePath(nodeId: number): boolean {
-    // 开始节点总是在活跃路径中
-    const node = this.workflowData.items.find(item => item.id === nodeId)
-    if (!node) return false
-    
-    if (node.type === 'start') {
-      this.activePath.add(nodeId)
-      return true
-    }
-    
-    // 检查是否有上游节点在活跃路径中
-    const incomingLinks = this.workflowData.links.filter(link => link.target === nodeId)
-    
-    for (const link of incomingLinks) {
-      const sourceNode = this.workflowData.items.find(n => n.id === link.source)
-      if (!sourceNode) continue
-      
-      // 如果源节点不在活跃路径中，跳过
-      if (!this.activePath.has(link.source)) {
-        continue
-      }
-      
-      // 如果是决策节点的连接，检查分支是否匹配
-      if (sourceNode.type === 'decision' && link.branch) {
-        const selectedBranch = this.decisionPaths.get(sourceNode.id)
-        if (selectedBranch === link.branch) {
-          this.activePath.add(nodeId)
-          return true
-        }
-      } else {
-        // 普通连接，直接添加到活跃路径
-        this.activePath.add(nodeId)
-        return true
-      }
-    }
-    
-    return false
-  }
-  
   private async executeNode(nodeId: number): Promise<boolean> {
     const node = this.workflowData.items.find(item => item.id === nodeId)
     if (!node) return false
-    
+
+    // 检查节点是否已经执行过
+    if (this.executedNodes.has(nodeId)) {
+      return node.status === 'success'
+    }
+
     node.status = 'running'
     this.callbacks.onNodeStatusUpdate?.(node.id, 'running', node.result)
-    
+    this.callbacks.onNodeStart?.(node.id, node.name, node.type)
+
     try {
+      // 执行节点逻辑
       switch (node.type) {
         case 'start':
           return await this.runStartNode(node)
@@ -772,6 +1137,7 @@ export class WorkflowRunner {
         timestamp: new Date().toISOString()
       })
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
   }
@@ -783,63 +1149,57 @@ export class WorkflowRunner {
     let filePath = '';
     
     if (node.prompt && node.prompt.trim() !== '') {
-      // 尝试解析是否为两个参数的格式（用特定分隔符分隔）
       const parts = node.prompt.split('|').map(part => part.trim());
       if (parts.length === 2) {
         promptText = parts[0];
         filePath = parts[1];
       } else {
-        // 单参数格式，保持向后兼容
         promptText = node.prompt;
       }
     }
     
-    // 验证输入
     if (!promptText || promptText.trim() === '') {
       node.result = JSON.stringify({
-        result: '请输入文本',
+        result: this.t('input_text_required'),
         type: 'start',
         success: false,
-        error: '输入文本为空',
-        // 添加空的数据结构，确保下游能获取
+        error: this.t('input_text_empty'),
         outputByPort: { default: '' }
       });
       node.status = 'error';
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result);
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result);
       return false;
     }
     
-    // 如果有文件路径，读取文件内容
     let fileContent = '';
     if (filePath && filePath.trim() !== '') {
       try {
         fileContent = await window.ipcRenderer.invoke('readFile', filePath);
       } catch (error: any) {
         node.result = JSON.stringify({
-          result: `读取文件失败: ${error.message}`,
+          result: `${this.t('file_read_error')}: ${error.message}`,
           type: 'start',
           success: false,
           error: error.message,
-          // 添加空的数据结构，确保下游能获取
           outputByPort: { default: '' }
         });
         node.status = 'error';
         this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result);
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result);
         return false;
       }
     }
     
-    // 构建结果对象 - 确保有 outputByPort 结构
     const startResult = {
       type: 'start',
       success: true,
       prompt: promptText,
       filePath: filePath || null,
       fileContent: fileContent || null,
-      result: fileContent ? `${promptText}\n\n文件内容:\n${fileContent}` : promptText,
-      // 关键：添加 outputByPort 结构
+      result: fileContent ? `${promptText}\n\n${this.t('file_content')}:\n${fileContent}` : promptText,
       outputByPort: {
-        default: fileContent ? `${promptText}\n\n文件内容:\n${fileContent}` : promptText,
+        default: fileContent ? `${promptText}\n\n${this.t('file_content')}:\n${fileContent}` : promptText,
         prompt: promptText,
         file: fileContent || null
       },
@@ -849,6 +1209,7 @@ export class WorkflowRunner {
     node.result = JSON.stringify(startResult);
     node.status = 'success';
     this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result);
+    this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result);
     this.callbacks.onSaveWorkflow?.();
     return true;
   }
@@ -862,8 +1223,8 @@ export class WorkflowRunner {
       const sourceNode = this.workflowData.items.find(n => n.id === link.source)
       if (!sourceNode) continue
       
-      // 检查源节点是否在活跃路径中
-      if (!this.activePath.has(sourceNode.id)) {
+      // 检查源节点是否已执行
+      if (!this.executedNodes.has(sourceNode.id)) {
         continue
       }
       
@@ -888,9 +1249,8 @@ export class WorkflowRunner {
     if (Object.keys(results).length > 0) {
       let outputText = ''
       
-      // 添加决策路径信息
       if (this.decisionPaths.size > 0) {
-        outputText += ''
+        outputText += `## ${this.t('decision_paths')}\n\n`
         this.decisionPaths.forEach((branchId, nodeId) => {
           const decisionNode = this.workflowData.items.find(n => n.id === nodeId)
           if (decisionNode) {
@@ -904,7 +1264,7 @@ export class WorkflowRunner {
       Object.entries(results).forEach(([nodeKey, nodeResult]) => {
         const nodeId = nodeKey.replace('node_', '')
         const sourceNode = this.workflowData.items.find(n => n.id === parseInt(nodeId))
-        const nodeName = sourceNode?.name || `节点 ${nodeId}`
+        const nodeName = sourceNode?.name || `${this.t('node')} ${nodeId}`
         
         outputText += `\n## ${nodeName}\n`
         
@@ -922,12 +1282,13 @@ export class WorkflowRunner {
       
       summaryResult.result = outputText
     } else {
-      summaryResult.result = '工作流执行完成，但没有输入节点连接到结束节点。'
+      summaryResult.result = this.t('no_input_to_end')
     }
     
     node.result = JSON.stringify(summaryResult)
     node.status = 'success'
     this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+    this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
     this.callbacks.onSaveWorkflow?.()
     return true
   }
@@ -939,19 +1300,21 @@ export class WorkflowRunner {
       node.result = validation.message
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
     // 获取上游数据（考虑端口）
-    const contexts = this.getNodeContextWithPorts(node.id)
-    
+    const contexts = await this.getNodeContextWithPorts(node.id)
+    console.log(contexts)
     // 合并所有上下文数据
     let combinedContext = ''
     if (contexts.length > 0) {
-      combinedContext = '相关上下文信息：\n\n' + contexts.join('\n\n') + '\n\n'
+      combinedContext = `${this.t('relevant_context')}：\n\n` + contexts.join('\n\n') + '\n\n'
     }
     
-    const fullPrompt = combinedContext + '用户指令：' + node.prompt
+    const fullPrompt = combinedContext + `${this.t('user_instruction')}：` + node.prompt
+    console.log(fullPrompt)
     const messages = [{ role: 'user', content: fullPrompt }]
     
     const originalConfig = JSON.parse(JSON.stringify(this.store.AIconfig?.llm || {}))
@@ -1005,7 +1368,6 @@ export class WorkflowRunner {
         
         this.store.sendToAI(
           messages,
-          null,
           {
             onStream: (chunk: string) => {
               streamContent += chunk
@@ -1040,12 +1402,13 @@ export class WorkflowRunner {
       
       node.status = 'success'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
       this.callbacks.onSaveWorkflow?.()
       return true
       
     } catch (error: any) {
       node.result = JSON.stringify({
-        result: `推理错误: ${error.message}`,
+        result: `${this.t('reasoning_error')}: ${error.message}`,
         model: node.model,
         model_type: node.model_type,
         timestamp: new Date().toISOString(),
@@ -1054,6 +1417,7 @@ export class WorkflowRunner {
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       return false
       
@@ -1067,19 +1431,20 @@ export class WorkflowRunner {
   private async runDecisionNode(node: NodeData): Promise<boolean> {
     if (!node.decisionBranches || node.decisionBranches.length < 2) {
       node.result = JSON.stringify({
-        result: '决策节点需要至少2个分支',
+        result: this.t('decision_need_branches'),
         type: 'decision',
         success: false,
-        error: '分支数量不足'
+        error: this.t('insufficient_branches')
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
     try {
       // 获取上游节点的数据作为决策依据（考虑端口）
-      const contexts = this.getNodeContextWithPorts(node.id)
+      const contexts = await this.getNodeContextWithPorts(node.id)
       let inputData = ''
       
       if (contexts.length > 0) {
@@ -1094,23 +1459,24 @@ export class WorkflowRunner {
         // LLM决策模式
         if (!node.model_type || !node.model) {
           node.result = JSON.stringify({
-            result: '请配置LLM模型',
+            result: this.t('configure_llm_model'),
             type: 'decision',
             success: false,
-            error: '模型未配置'
+            error: this.t('model_not_configured')
           })
           node.status = 'error'
           this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+          this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
           return false
         }
         
         // 构建分支选择提示词
         const branchesInfo = node.decisionBranches.map(branch => 
-          `分支ID: ${branch.id}\n分支名称: ${branch.name}\n描述: ${branch.description || '无'}`
+          `${this.t('branch_id')}: ${branch.id}\n${this.t('branch_name')}: ${branch.name}\n${this.t('description')}: ${branch.description || this.t('none')}`
         ).join('\n\n')
         
         const decisionPrompt = node.decisionPrompt || 
-          `请根据以下内容进行分析决策，从提供的分支中选择最合适的一个：\n\n输入内容：{input}\n\n可用分支：{branches}\n\n请只返回分支ID，不要包含其他内容。`
+          `${this.t('decision_prompt_template')}\n\n${this.t('input_content')}：{input}\n\n${this.t('available_branches')}：{branches}\n\n${this.t('return_branch_id_only')}`
         
         const fullPrompt = decisionPrompt
           .replace('{input}', inputData)
@@ -1138,7 +1504,6 @@ export class WorkflowRunner {
                 this.store.AIconfig.llm.openai.model = node.model || this.store.AIconfig.llm.openai.model
               }
               break
-            // 其他模型类型...
           }
           
           const aiResponse = await new Promise<string>((resolve, reject) => {
@@ -1149,7 +1514,6 @@ export class WorkflowRunner {
             
             this.store.sendToAI(
               messages,
-              null,
               {
                 onComplete: (fullContent: string) => {
                   resolve(fullContent)
@@ -1175,20 +1539,21 @@ export class WorkflowRunner {
         // 规则决策模式
         if (!node.decisionRules) {
           node.result = JSON.stringify({
-            result: '请配置决策规则',
+            result: this.t('configure_decision_rules'),
             type: 'decision',
             success: false,
-            error: '规则未配置'
+            error: this.t('rules_not_configured')
           })
           node.status = 'error'
           this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+          this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
           return false
         }
         
         try {
           const rules = JSON.parse(node.decisionRules)
           if (!Array.isArray(rules)) {
-            throw new Error('规则必须是数组格式')
+            throw new Error(this.t('rules_must_be_array'))
           }
           
           // 评估规则
@@ -1198,7 +1563,6 @@ export class WorkflowRunner {
                 // 创建一个安全的评估环境
                 const safeEval = (condition: string, context: any): boolean => {
                   try {
-                    // 简单的条件评估，实际项目中应该使用更安全的评估方法
                     if (condition === 'true') return true
                     if (condition === 'false') return false
                     
@@ -1230,7 +1594,6 @@ export class WorkflowRunner {
                       }
                     }
                     
-                    // 默认情况
                     return false
                   } catch {
                     return false
@@ -1239,7 +1602,7 @@ export class WorkflowRunner {
                 
                 if (safeEval(rule.condition, { input: inputData })) {
                   selectedBranchId = rule.branch
-                  reason = `规则匹配: ${rule.condition}`
+                  reason = `${this.t('rule_match')}: ${rule.condition}`
                   break
                 }
               } catch (error) {
@@ -1254,34 +1617,41 @@ export class WorkflowRunner {
             const lastRule = rules[rules.length - 1]
             if (lastRule.branch) {
               selectedBranchId = lastRule.branch
-              reason = '默认规则'
+              reason = this.t('default_rule')
             }
           }
           
         } catch (error: any) {
           node.result = JSON.stringify({
-            result: `规则解析失败: ${error.message}`,
+            result: `${this.t('rule_parse_failed')}: ${error.message}`,
             type: 'decision',
             success: false,
             error: error.message
           })
           node.status = 'error'
           this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+          this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
           return false
         }
       }
       
       // 验证选中的分支是否有效
       if (!selectedBranchId || !node.decisionBranches.some(branch => branch.id === selectedBranchId)) {
-        // 如果没有有效选择，使用第一个分支作为默认
         selectedBranchId = node.decisionBranches[0].id
-        reason = '默认分支（无有效选择）'
+        reason = this.t('default_branch_no_valid')
       }
       
       // 记录决策结果
       this.decisionPaths.set(node.id, selectedBranchId)
       
       const selectedBranch = node.decisionBranches.find(branch => branch.id === selectedBranchId)
+      
+      // 存储数据模板
+      if (selectedBranch?.dataTemplate) {
+        this.decisionDataTemplates.set(node.id, selectedBranch.dataTemplate)
+      } else {
+        this.decisionDataTemplates.set(node.id, '{input}')
+      }
       
       // 触发回调
       this.callbacks.onDecisionBranchSelected?.(
@@ -1299,20 +1669,22 @@ export class WorkflowRunner {
         selectedBranch: selectedBranchId,
         selectedBranchName: selectedBranch?.name || selectedBranchId,
         reason: reason,
+        dataTemplate: this.decisionDataTemplates.get(node.id),
         allBranches: node.decisionBranches,
-        inputPreview: inputData.substring(0, 200) + (inputData.length > 200 ? '...' : ''),
+        inputPreview: inputData,
         timestamp: new Date().toISOString()
       }
       
       node.result = JSON.stringify(formattedResult)
       node.status = 'success'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
       this.callbacks.onSaveWorkflow?.()
       return true
       
     } catch (error: any) {
       node.result = JSON.stringify({
-        result: `决策失败: ${error.message}`,
+        result: `${this.t('decision_failed')}: ${error.message}`,
         type: 'decision',
         success: false,
         error: error.message,
@@ -1320,6 +1692,7 @@ export class WorkflowRunner {
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       return false
     }
@@ -1328,11 +1701,12 @@ export class WorkflowRunner {
   private async runTextNode(node: NodeData): Promise<boolean> {
     if (!node.prompt || node.prompt.trim() === '') {
       node.result = JSON.stringify({
-        result: '请输入文本',
+        result: this.t('enter_text'),
         status: 'error'
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
@@ -1343,6 +1717,7 @@ export class WorkflowRunner {
     
     node.status = 'success'
     this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+    this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
     this.callbacks.onSaveWorkflow?.()
     return true
   }
@@ -1351,13 +1726,14 @@ export class WorkflowRunner {
     // 简化的结构化节点执行
     if (!node.structuredData || node.structuredData.length === 0) {
       node.result = JSON.stringify({
-        result: '表格为空',
+        result: this.t('empty_table'),
         type: 'structured',
         success: false,
-        error: '表格为空'
+        error: this.t('empty_table')
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
@@ -1375,12 +1751,13 @@ export class WorkflowRunner {
       node.result = JSON.stringify(formattedResult)
       node.status = 'success'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
       this.callbacks.onSaveWorkflow?.()
       return true
       
     } catch (error: any) {
       node.result = JSON.stringify({
-        result: `结构化处理失败: ${error.message}`,
+        result: `${this.t('structured_error')}: ${error.message}`,
         type: 'structured',
         success: false,
         error: error.message,
@@ -1388,6 +1765,7 @@ export class WorkflowRunner {
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       return false
     }
@@ -1395,9 +1773,10 @@ export class WorkflowRunner {
   
   private async runWebpageNode(node: NodeData): Promise<boolean> {
     if (!node.prompt || node.prompt.trim() === '' || node.prompt === 'https://') {
-      node.result = '请输入网址'
+      node.result = this.t('enter_url')
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
@@ -1420,12 +1799,14 @@ export class WorkflowRunner {
       
       node.status = 'success'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
       this.callbacks.onSaveWorkflow?.()
       return true
     } catch (error: any) {
-      node.result = `获取网页内容失败: ${error.message}`
+      node.result = `${this.t('fetch_error')}: ${error.message}`
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       return false
     }
@@ -1433,9 +1814,10 @@ export class WorkflowRunner {
   
   private async runWebNode(node: NodeData): Promise<boolean> {
     if (!node.prompt || node.prompt.trim() === '') {
-      node.result = '请输入搜索关键词'
+      node.result = this.t('enter_search_keywords')
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
@@ -1465,12 +1847,14 @@ export class WorkflowRunner {
       
       node.status = 'success'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
       this.callbacks.onSaveWorkflow?.()
       return true
     } catch (error: any) {
-      node.result = `搜索失败: ${error.message}`
+      node.result = `${this.t('search_error')}: ${error.message}`
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       return false
     }
@@ -1479,8 +1863,8 @@ export class WorkflowRunner {
   private async runLocalNode(node: NodeData): Promise<boolean> {
     let filePath = node.prompt;
     
-    if (!filePath || filePath.trim() === '' || filePath === '拖入文件或点击选择') {
-      const contexts = this.getNodeContextWithPorts(node.id);
+    if (!filePath || filePath.trim() === '' || filePath === this.t('drag_file')) {
+      const contexts = await this.getNodeContextWithPorts(node.id);
       if (contexts.length > 0) {
         for (const context of contexts) {
           try {
@@ -1506,13 +1890,14 @@ export class WorkflowRunner {
       
       if (!filePath || filePath.trim() === '') {
         node.result = JSON.stringify({
-          result: '请选择文件或连接提供文件路径的上游节点',
+          result: this.t('select_file_or_connect_upstream'),
           type: 'local',
           success: false,
-          error: '文件路径为空'
+          error: this.t('file_path_empty')
         });
         node.status = 'error';
         this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result);
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result);
         return false;
       }
     }
@@ -1545,13 +1930,14 @@ export class WorkflowRunner {
         
         if (templates.length === 0) {
           node.result = JSON.stringify({
-            result: '请配置模板',
+            result: this.t('configure_templates'),
             type: 'local',
             success: false,
-            error: '模板配置为空'
+            error: this.t('no_templates')
           });
           node.status = 'error';
           this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result);
+          this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result);
           return false;
         }
         
@@ -1566,14 +1952,14 @@ export class WorkflowRunner {
         
         let filteredContent = content;
         imagePatterns.forEach(pattern => {
-          filteredContent = filteredContent.replace(pattern, '[图片已过滤]');
+          filteredContent = filteredContent.replace(pattern, this.t('image_filtered'));
         });
         
         const markdownBase64Pattern = /!\[[^\]]*\]\(data:image\/[^)]+\)/gi;
-        filteredContent = filteredContent.replace(markdownBase64Pattern, '![图片已过滤]');
+        filteredContent = filteredContent.replace(markdownBase64Pattern, this.t('image_filtered_markdown'));
         
         const htmlBase64Pattern = /<img[^>]+src=["']data:image\/[^"']+["'][^>]*>/gi;
-        filteredContent = filteredContent.replace(htmlBase64Pattern, '<img src="[图片已过滤]">');
+        filteredContent = filteredContent.replace(htmlBase64Pattern, '<img src="' + this.t('image_filtered') + '">');
         
         const slices: Record<string, string> = {};
         
@@ -1608,7 +1994,7 @@ export class WorkflowRunner {
             }
             
           } catch (error: any) {
-            this.log(`模板 "${template.name}" 匹配失败: ${error.message}`, 'warning');
+            this.log(`${this.t('template_match_failed')} "${template.name}": ${error.message}`, 'warning');
           }
         });
         
@@ -1683,7 +2069,7 @@ export class WorkflowRunner {
           templates: templates,
           slices: slices,
           outputByPort: outputByPort,
-          result: `文件处理完成。总共匹配到 ${allMatches.length} 个位置，生成 ${templates.length} 组切片。`,
+          result: `${this.t('file_processed')} ${allMatches.length} ${this.t('matches')}，${templates.length} ${this.t('slice_groups')}`,
           timestamp: new Date().toISOString()
         };
 
@@ -1692,12 +2078,13 @@ export class WorkflowRunner {
       
       node.status = 'success';
       this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result);
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result);
       this.callbacks.onSaveWorkflow?.();
       return true;
       
     } catch (error: any) {
       node.result = JSON.stringify({
-        result: `读取文件失败: ${error.message}`,
+        result: `${this.t('file_read_error')}: ${error.message}`,
         type: 'local',
         success: false,
         error: error.message,
@@ -1705,6 +2092,7 @@ export class WorkflowRunner {
       });
       node.status = 'error';
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result);
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result);
       this.callbacks.onSaveWorkflow?.();
       return false;
     }
@@ -1713,51 +2101,97 @@ export class WorkflowRunner {
   private async runPythonNode(node: NodeData): Promise<boolean> {
     const pythonCode = node.prompt || ''
     
-    if (!pythonCode.trim()) {
-      node.result = '请输入代码'
-      node.status = 'error'
-      this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
-      return false
+    // 优先使用节点自身的代码
+    let codeToExecute = pythonCode;
+    
+    // 如果没有代码，从上游节点获取
+    if (!codeToExecute.trim()) {
+      const sourceLinks = this.workflowData.links.filter(link => link.target === node.id);
+      const upstreamData = this.getUpstreamDataWithPorts(node.id);
+      
+      if (upstreamData && Object.keys(upstreamData).length > 0) {
+        // 遍历所有上游数据，找到最可能是代码的内容
+        for (const [key, value] of Object.entries(upstreamData)) {
+          if (value && typeof value === 'string') {
+            // 检查是否包含Python代码特征
+            if (value.includes('def ') || 
+                value.includes('import ') || 
+                value.includes('print(') ||
+                value.includes('```python') ||
+                value.includes('plt.')) {
+              // 提取代码块中的内容
+              let extractedCode = value;
+              
+              // 处理markdown代码块
+              const codeBlockMatch = value.match(/```python\s*([\s\S]*?)```/);
+              if (codeBlockMatch) {
+                extractedCode = codeBlockMatch[1].trim();
+              } else {
+                // 如果不是markdown格式，可能是纯代码
+                extractedCode = value.trim();
+              }
+              
+              codeToExecute = extractedCode;
+              break;
+            }
+          }
+        }
+      }
     }
     
-    const sourceLinks = this.workflowData.links.filter(link => link.target === node.id)
-    const upstreamData = sourceLinks.length > 0 ? this.getUpstreamDataWithPorts(node.id) : null
+    if (!codeToExecute.trim()) {
+      node.result = JSON.stringify({
+        result: this.t('no_python_code'),
+        type: 'python',
+        success: false,
+        error: this.t('code_empty')
+      });
+      node.status = 'error';
+      this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result);
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result);
+      return false;
+    }
     
     try {
       const environment = this.store.TrustedPython ? 'trusted' : 'safe'
       
-      const result = await this.safeIpcInvoke('executePythonCodeWithEnvironment', {
-        code: pythonCode,
+      const result = await this.safeIpcInvoke('executePython', {
+        code: codeToExecute,
         environment: environment,
-        input: upstreamData
+        input: null
       })
       
-      if (result.success) {
+      if (result && result.success) {
         node.result = JSON.stringify({
           result: result.output?.trim() || result.result || '✓',
           type: 'python',
-          success: true
+          success: true,
+          executionTime: result.executionTime,
+          logs: result.logs
         })
         node.status = 'success'
         this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
         this.callbacks.onSaveWorkflow?.()
         return true
       } else {
+        const errorMessage = result?.error || result?.output || this.t('unknown_error')
         node.result = JSON.stringify({
-          result: `Python执行错误: ${result.error || '未知错误'}`,
+          result: `${this.t('python_execution_error')}: ${errorMessage}`,
           type: 'python',
           success: false,
-          error: result.error,
+          error: errorMessage,
           timestamp: new Date().toISOString()
         })
         node.status = 'error'
         this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
         this.callbacks.onSaveWorkflow?.()
         return false
       }
     } catch (error: any) {
       node.result = JSON.stringify({
-        result: `Python执行异常: ${error.message}`,
+        result: `${this.t('python_execution_exception')}: ${error.message}`,
         type: 'python',
         success: false,
         error: error.message,
@@ -1765,6 +2199,7 @@ export class WorkflowRunner {
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       return false
     }
@@ -1773,13 +2208,14 @@ export class WorkflowRunner {
   private async runKnowledgeNode(node: NodeData): Promise<boolean> {
     if (!node.kbPath || node.kbPath.trim() === '') {
       node.result = JSON.stringify({
-        result: '请选择知识库文件',
+        result: this.t('select_kb_file'),
         type: 'knowledge_retrieval',
         success: false,
-        error: '请选择知识库文件'
+        error: this.t('kb_file_required')
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
@@ -1808,51 +2244,72 @@ export class WorkflowRunner {
     
     if (!queryText || queryText.trim() === '') {
       node.result = JSON.stringify({
-        result: '请输入查询文本',
+        result: this.t('enter_query_text'),
         type: 'knowledge_retrieval',
         success: false,
-        error: '请输入查询文本'
+        error: this.t('query_required')
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
     try {
-      const options = {
-        topK: kbOptions.topK || 5,
-        summaryWeight: kbOptions.summaryWeight || 0.7,
-        useReverseInference: kbOptions.useReverseInference || false,
-        reverseWeight: kbOptions.reverseWeight || 0.3,
-        embedModel: kbOptions.embedModel || '',
-        debug: kbOptions.debug || false,
-        missingModelStrategy: kbOptions.missingModelStrategy || 'error',
-        fallbackModels: kbOptions.fallbackModels || ['nomic-embed-text:latest', 'all-minilm:latest'],
-        ollamaHost: this.store.AIconfig?.llm?.ollama?.model_url || 'http://127.0.0.1:11434'
-      }
-      
-      const retrievalResult = await retrieveKnowledge(queryText, node.kbPath, options)
-      
-      const formattedResult = {
-        type: 'knowledge_retrieval',
-        success: true,
-        query: queryText,
-        context: retrievalResult.context,
-        relevantBlocks: retrievalResult.relevantBlocks,
-        usedEmbedModel: retrievalResult.usedEmbedModel,
-        debugInfo: retrievalResult.debugInfo,
-        timestamp: new Date().toISOString()
-      }
-      
-      node.result = JSON.stringify(formattedResult)
-      node.status = 'success'
-      this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
-      this.callbacks.onSaveWorkflow?.()
-      return true
-      
-    } catch (error: any) {
+    const options = {
+      topK: kbOptions.topK || 5,
+      summaryWeight: kbOptions.summaryWeight || 0.7,
+      useReverseInference: kbOptions.useReverseInference || false,
+      reverseWeight: kbOptions.reverseWeight || 0.3,
+      embedModel: kbOptions.embedModel || '',
+      debug: kbOptions.debug || false,
+      missingModelStrategy: kbOptions.missingModelStrategy || 'error',
+      fallbackModels: kbOptions.fallbackModels || ['nomic-embed-text:latest', 'all-minilm:latest'],
+      ollamaHost: this.store.AIconfig?.llm?.ollama?.model_url || 'http://127.0.0.1:11434'
+    }
+    
+    const retrievalResult = await retrieveKnowledge(queryText, node.kbPath, options)
+    
+    // 构建更友好的结果格式
+    let resultText = ''
+    
+    if (retrievalResult.context) {
+      resultText = retrievalResult.context
+    } else if (retrievalResult.relevantBlocks && retrievalResult.relevantBlocks.length > 0) {
+      // 如果没有 context，从 relevantBlocks 构建
+      resultText = `${this.t('relevant_knowledge')}：\n\n`
+      retrievalResult.relevantBlocks.forEach((block: any, index: number) => {
+        resultText += `${this.t('knowledge_item')} ${index + 1}】\n`
+        if (block.text) resultText += `${block.text}\n`
+        if (block.metadata?.source) resultText += `${this.t('source')}：${block.metadata.source}\n`
+        resultText += '\n'
+      })
+    }
+    
+    const formattedResult = {
+      type: 'knowledge_retrieval',
+      success: true,
+      query: queryText,
+      // 主要结果放在 result 字段，方便下游节点获取
+      result: resultText,
+      // 原始数据放在 context 字段
+      context: retrievalResult.context,
+      relevantBlocks: retrievalResult.relevantBlocks,
+      usedEmbedModel: retrievalResult.usedEmbedModel,
+      debugInfo: retrievalResult.debugInfo,
+      timestamp: new Date().toISOString()
+    }
+    
+    node.result = JSON.stringify(formattedResult)
+    node.status = 'success'
+    this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+    this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
+    this.callbacks.onSaveWorkflow?.()
+    return true
+    
+  } catch (error: any) {
       node.result = JSON.stringify({
-        result: `知识库检索失败: ${error.message}`,
+        result: `${this.t('retrieval_error')}: ${error.message}`,
         type: 'knowledge_retrieval',
         success: false,
         error: error.message,
@@ -1860,6 +2317,7 @@ export class WorkflowRunner {
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       return false
     }
@@ -1868,13 +2326,14 @@ export class WorkflowRunner {
   private async runMcpNode(node: NodeData): Promise<boolean> {
     if (!node.mcpConfig) {
       node.result = JSON.stringify({
-        result: 'MCP 配置为空',
+        result: this.t('mcp_config_empty'),
         type: 'mcp',
         success: false,
-        error: 'MCP 配置为空'
+        error: this.t('mcp_config_empty')
       })
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       return false
     }
     
@@ -1886,11 +2345,11 @@ export class WorkflowRunner {
         try {
           connected = await this.connectMcpNode(node.id)
           if (!connected) {
-            throw new Error('自动连接失败')
+            throw new Error(this.t('auto_connect_failed'))
           }
         } catch (error: any) {
           node.result = JSON.stringify({
-            result: `MCP 连接失败: ${error.message}`,
+            result: `${this.t('mcp_connect_failed')}: ${error.message}`,
             type: 'mcp',
             success: false,
             error: error.message,
@@ -1898,6 +2357,7 @@ export class WorkflowRunner {
           })
           node.status = 'error'
           this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+          this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
           this.callbacks.onSaveWorkflow?.()
           return false
         }
@@ -1905,14 +2365,15 @@ export class WorkflowRunner {
       
       if (!connected) {
         node.result = JSON.stringify({
-          result: 'MCP 未连接',
+          result: this.t('mcp_not_connected'),
           type: 'mcp',
           success: false,
-          error: 'MCP 未连接',
+          error: this.t('mcp_not_connected'),
           timestamp: new Date().toISOString()
         })
         node.status = 'error'
         this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
         this.callbacks.onSaveWorkflow?.()
         return false
       }
@@ -1921,15 +2382,16 @@ export class WorkflowRunner {
       const selectedTool = node.mcpConfig.selectedTool
       if (!selectedTool) {
         node.result = JSON.stringify({
-          result: '未选择 MCP 工具',
+          result: this.t('no_mcp_tool_selected'),
           type: 'mcp',
           success: false,
-          error: '未选择 MCP 工具',
+          error: this.t('no_mcp_tool_selected'),
           availableTools: node.mcpTools?.map(t => t.name) || [],
           timestamp: new Date().toISOString()
         })
         node.status = 'error'
         this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
         this.callbacks.onSaveWorkflow?.()
         return false
       }
@@ -1938,7 +2400,7 @@ export class WorkflowRunner {
       let toolArguments = node.mcpConfig.toolArguments || {}
       
       // 如果有上游节点，可以将其结果作为输入（考虑端口）
-      const contexts = this.getNodeContextWithPorts(node.id)
+      const contexts = await this.getNodeContextWithPorts(node.id)
       if (contexts.length > 0 && (!toolArguments.input || !toolArguments.query)) {
         // 自动将上游数据作为输入
         const combinedInput = contexts.join('\n\n')
@@ -1957,7 +2419,7 @@ export class WorkflowRunner {
         }
       }
       
-      this.log(`执行 MCP 工具: ${selectedTool}，参数: ${JSON.stringify(toolArguments)}`, 'info')
+      this.log(`${this.t('executing_mcp_tool')}: ${selectedTool}，${this.t('params')}: ${JSON.stringify(toolArguments)}`, 'info')
       
       // 调用 MCP 工具
       const toolResult = await mcpManager.callTool(node.id, selectedTool, toolArguments)
@@ -1976,15 +2438,16 @@ export class WorkflowRunner {
         node.result = JSON.stringify(formattedResult)
         node.status = 'success'
         this.callbacks.onNodeStatusUpdate?.(node.id, 'success', node.result)
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'success', node.result)
         this.callbacks.onSaveWorkflow?.()
         
-        this.log(`MCP 工具执行成功: ${selectedTool}`, 'info')
+        this.log(`${this.t('mcp_tool_success')}: ${selectedTool}`, 'info')
         return true
       } else {
         const formattedResult = {
           type: 'mcp',
           success: false,
-          result: `MCP 工具执行失败: ${toolResult.error}`,
+          result: `${this.t('mcp_tool_failed')}: ${toolResult.error}`,
           tool: selectedTool,
           arguments: toolArguments,
           error: toolResult.error,
@@ -1995,9 +2458,10 @@ export class WorkflowRunner {
         node.result = JSON.stringify(formattedResult)
         node.status = 'error'
         this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+        this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
         this.callbacks.onSaveWorkflow?.()
         
-        this.log(`MCP 工具执行失败: ${selectedTool} - ${toolResult.error}`, 'error')
+        this.log(`${this.t('mcp_tool_failed')}: ${selectedTool} - ${toolResult.error}`, 'error')
         return false
       }
       
@@ -2005,7 +2469,7 @@ export class WorkflowRunner {
       const formattedResult = {
         type: 'mcp',
         success: false,
-        result: `MCP 节点执行异常: ${error.message}`,
+        result: `${this.t('mcp_execution_exception')}: ${error.message}`,
         error: error.message,
         timestamp: new Date().toISOString()
       }
@@ -2013,9 +2477,10 @@ export class WorkflowRunner {
       node.result = JSON.stringify(formattedResult)
       node.status = 'error'
       this.callbacks.onNodeStatusUpdate?.(node.id, 'error', node.result)
+      this.callbacks.onNodeComplete?.(node.id, node.name, node.type, 'error', node.result)
       this.callbacks.onSaveWorkflow?.()
       
-      this.log(`MCP 节点执行异常: ${error.message}`, 'error')
+      this.log(`${this.t('mcp_execution_exception')}: ${error.message}`, 'error')
       return false
     }
   }
@@ -2023,11 +2488,11 @@ export class WorkflowRunner {
   // 辅助方法
   private validateModelConfig(node: NodeData): { valid: boolean; message: string } {
     if (!node.model_type) {
-      return { valid: false, message: '请选择模型类型' }
+      return { valid: false, message: this.t('select_model_type') }
     }
     
     if (!node.model) {
-      return { valid: false, message: '请选择模型' }
+      return { valid: false, message: this.t('select_model') }
     }
     
     switch (node.model_type) {
@@ -2037,31 +2502,31 @@ export class WorkflowRunner {
       case 'openai':
       case 'deepseek':
         if (!this.store.AIconfig?.llm?.openai?.api_key) {
-          return { valid: false, message: '需要API密钥' }
+          return { valid: false, message: this.t('api_key_required') }
         }
         break
         
       case 'anthropic':
         if (!this.store.AIconfig?.llm?.anthropic?.api_key) {
-          return { valid: false, message: '需要API密钥' }
+          return { valid: false, message: this.t('api_key_required') }
         }
         break
         
       case 'google':
         if (!this.store.AIconfig?.llm?.google?.api_key) {
-          return { valid: false, message: '需要API密钥' }
+          return { valid: false, message: this.t('api_key_required') }
         }
         break
         
       case 'azure':
         if (!this.store.AIconfig?.llm?.azure?.api_key || !this.store.AIconfig?.llm?.azure?.endpoint || !this.store.AIconfig?.llm?.azure?.deployment) {
-          return { valid: false, message: '需要API密钥' }
+          return { valid: false, message: this.t('api_key_required') }
         }
         break
         
       case 'custom':
         if (!this.store.AIconfig?.llm?.custom?.api_url) {
-          return { valid: false, message: '需要API地址' }
+          return { valid: false, message: this.t('api_url_required') }
         }
         break
     }
@@ -2069,8 +2534,8 @@ export class WorkflowRunner {
     return { valid: true, message: '' }
   }
   
-  // 新增：支持端口的节点上下文获取方法
-  private getNodeContextWithPorts(nodeId: number): string[] {
+  // 支持端口的节点上下文获取方法
+  private async getNodeContextWithPorts(nodeId: number): Promise<string[]> {
     const sourceLinks = this.workflowData.links.filter(link => link.target === nodeId)
     const contexts: string[] = []
     
@@ -2078,15 +2543,14 @@ export class WorkflowRunner {
       const sourceNode = this.workflowData.items.find(n => n.id === link.source)
       if (!sourceNode) continue
       
-      // 检查源节点是否在活跃路径中
-      if (!this.activePath.has(sourceNode.id)) {
+      // 关键修改：检查节点状态是否为成功，而不是检查 executedNodes
+      if (sourceNode.status !== 'success') {
         continue
       }
       
-      // 获取源节点的数据（考虑端口）
-      const nodeData = this.getSourceNodeData(sourceNode.id, link.sourcePort)
+      // 获取源节点的数据（考虑端口），传入目标节点ID
+      const nodeData = this.getSourceNodeData(sourceNode.id, link.sourcePort, nodeId)
       if (nodeData !== null && nodeData !== undefined) {
-        // 直接添加格式化后的字符串
         contexts.push(String(nodeData))
       }
     }
@@ -2094,7 +2558,7 @@ export class WorkflowRunner {
     return contexts
   }
   
-  private getSourceNodeData(sourceNodeId: number, sourcePort?: string): any {
+  private getSourceNodeData(sourceNodeId: number, sourcePort?: string, targetNodeId?: number): any {
     const sourceNode = this.workflowData.items.find(n => n.id === sourceNodeId)
     if (!sourceNode || !sourceNode.result) {
       return null
@@ -2103,43 +2567,34 @@ export class WorkflowRunner {
     try {
       const parsed = JSON.parse(sourceNode.result)
       
-      // 特殊处理决策节点
+      // 特殊处理决策节点 - 应用数据模板
       if (sourceNode.type === 'decision') {
-        // 对于连接到决策节点的下游节点，我们始终提供决策节点的上游数据
-        // 因为分支节点需要基于原始数据进行处理，而不是决策结果本身
-        
-        // 从决策节点的结果中获取上游数据
-        if (parsed.upstreamData) {
-          // 如果是字符串格式的上游数据，直接返回
-          if (typeof parsed.upstreamData === 'string') {
-            return parsed.upstreamData
-          }
-          // 如果是对象格式，合并所有值
-          else if (typeof parsed.upstreamData === 'object') {
-            const values = Object.values(parsed.upstreamData)
-            if (values.length > 0) {
-              return values.join('\n\n')
-            }
-          }
+        // 获取上游数据（决策节点的输入）
+        let inputData = ''
+        if (parsed.inputPreview) {
+          inputData = parsed.inputPreview
+        } else if (parsed.result) {
+          inputData = typeof parsed.result === 'string' 
+            ? parsed.result 
+            : JSON.stringify(parsed.result)
         }
         
-        // 如果没有格式化后的上游数据，尝试从原始数据获取
-        if (parsed.upstreamDataRaw && typeof parsed.upstreamDataRaw === 'object') {
-          const values = Object.values(parsed.upstreamDataRaw)
-          if (values.length > 0) {
-            return values.map(val => 
-              typeof val === 'string' ? val : JSON.stringify(val, null, 2)
-            ).join('\n\n')
-          }
-        }
+        // 获取该决策节点选中的分支的数据模板
+        const dataTemplate = this.decisionDataTemplates.get(sourceNodeId) || '{input}'
         
-        // 如果也没有原始数据，返回决策结果本身
-        return parsed.result || JSON.stringify(parsed, null, 2)
+        // 应用模板替换
+        let processedData = this.applyDataTemplate(dataTemplate, {
+          input: inputData,
+          branchId: this.decisionPaths.get(sourceNodeId) || '',
+          branchName: parsed.selectedBranchName || '',
+          result: parsed.result
+        })
+        
+        return processedData
       }
       
       // 本地文件节点且有端口连接
       if (sourceNode.type === 'local' && sourceNode.fileMode === 'template') {
-        // 优先从 outputByPort 中获取特定端口数据
         if (parsed.outputByPort && sourcePort) {
           const portData = parsed.outputByPort[sourcePort]
           if (portData !== undefined && portData !== null && portData !== '') {
@@ -2147,7 +2602,6 @@ export class WorkflowRunner {
           }
         }
         
-        // 如果没有特定端口数据，检查是否有切片数据
         if (parsed.slices && sourcePort && parsed.slices[sourcePort]) {
           return parsed.slices[sourcePort]
         }
@@ -2166,65 +2620,40 @@ export class WorkflowRunner {
         return parsed.result
       }
       
-      // 如果都没有，返回整个解析对象
       return parsed
       
     } catch {
-      // 如果解析失败，返回原始字符串
       return sourceNode.result
     }
   }
-  // 辅助方法：格式化端口数据为下游节点可用的格式
-  private formatPortDataForOutput(portData: any): string {
-    if (portData === null || portData === undefined) {
-      return ''
-    }
-    
-    if (typeof portData === 'string') {
-      return portData
-    }
-    
-    if (typeof portData === 'object') {
-      // 如果是空对象，返回空字符串
-      if (Object.keys(portData).length === 0) {
-        return ''
-      }
-      
-      // 如果是切片数据对象（键值对），合并所有值
-      const values = Object.values(portData)
-      if (values.length === 0) {
-        return ''
-      }
-      
-      // 所有值都是字符串，用分隔符合并
-      if (values.every(val => typeof val === 'string')) {
-        return values.join('\n\n---\n\n')
-      }
-      
-      // 尝试转换为JSON字符串
-      try {
-        return JSON.stringify(portData, null, 2)
-      } catch {
-        return String(portData)
-      }
-    }
-    
-    return String(portData)
-  }
 
-  // 辅助方法：格式化切片数据
-  private formatSlicesForOutput(slices: Record<string, string>): string {
-    if (!slices || Object.keys(slices).length === 0) {
-      return ''
+  // 应用数据模板的方法
+  private applyDataTemplate(template: string, context: Record<string, any>): string {
+    if (!template) return ''
+    
+    let result = template
+    
+    // 替换 {input} 为上游输入数据
+    if (context.input !== undefined) {
+      result = result.replace(/\{input\}/g, context.input)
     }
     
-    const sliceValues = Object.values(slices)
-    if (sliceValues.length === 0) {
-      return ''
+    // 替换 {branchId} 为分支ID
+    if (context.branchId !== undefined) {
+      result = result.replace(/\{branchId\}/g, context.branchId)
     }
     
-    // 合并所有切片内容
-    return sliceValues.join('\n\n---\n\n')
+    // 替换 {branchName} 为分支名称
+    if (context.branchName !== undefined) {
+      result = result.replace(/\{branchName\}/g, context.branchName)
+    }
+    
+    // 替换 {result} 为决策结果
+    if (context.result !== undefined) {
+      result = result.replace(/\{result\}/g, context.result)
+    }
+    
+    return result
   }
 
   private getUpstreamDataWithPorts(nodeId: number): any {
@@ -2240,14 +2669,13 @@ export class WorkflowRunner {
       const sourceNode = this.workflowData.items.find(n => n.id === link.source)
       if (!sourceNode || !sourceNode.result) continue
       
-      // 检查源节点是否在活跃路径中
-      if (!this.activePath.has(sourceNode.id)) {
+      // 关键修改：检查节点状态是否为成功
+      if (sourceNode.status !== 'success') {
         continue
       }
       
       const key = `node_${sourceNode.id}${link.sourcePort ? '_' + link.sourcePort : ''}`
       
-      // 获取源节点数据（考虑端口）
       const nodeData = this.getSourceNodeData(sourceNode.id, link.sourcePort)
       if (nodeData !== null) {
         upstreamData[key] = nodeData
@@ -2273,12 +2701,11 @@ export class WorkflowRunner {
         continue
       }
       
-      // 检查源节点是否在活跃路径中
-      if (!this.activePath.has(sourceNode.id)) {
+      // 关键修改：检查节点状态是否为成功
+      if (sourceNode.status !== 'success') {
         continue
       }
       
-      // 获取源节点数据（考虑端口）
       const nodeData = this.getSourceNodeData(sourceNode.id, link.sourcePort)
       if (nodeData !== null) {
         if (typeof nodeData === 'string') {
@@ -2337,11 +2764,9 @@ export class WorkflowRunner {
       const parsed = JSON.parse(result)
       if (parsed && typeof parsed === 'object') {
         if (parsed.error) {
-          // 尝试从错误信息中提取Python错误
           const errorStr = String(parsed.error)
           const lines = errorStr.split('\n')
           
-          // 查找包含Python错误信息的行
           const errorLines = lines.filter(line => 
             line.includes('Traceback') || 
             line.includes('Error:') || 
@@ -2366,25 +2791,21 @@ export class WorkflowRunner {
   }
   
   // 从LLM响应中提取分支ID
-  private extractBranchIdFromResponse(response: string, branches: Array<{id: string, name: string}>): string {
-    // 清理响应文本
+  private extractBranchIdFromResponse(response: string, branches: DecisionBranch[]): string {
     const cleanResponse = response.trim().toLowerCase()
     
-    // 尝试直接匹配分支ID
     for (const branch of branches) {
       if (cleanResponse.includes(branch.id.toLowerCase())) {
         return branch.id
       }
     }
     
-    // 尝试匹配分支名称
     for (const branch of branches) {
       if (cleanResponse.includes(branch.name.toLowerCase())) {
         return branch.id
       }
     }
     
-    // 提取可能的数字索引
     const numberMatch = cleanResponse.match(/(\d+)/)
     if (numberMatch) {
       const index = parseInt(numberMatch[1]) - 1
@@ -2393,7 +2814,6 @@ export class WorkflowRunner {
       }
     }
     
-    // 默认返回第一个分支
     return branches[0].id
   }
   

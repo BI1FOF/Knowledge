@@ -170,10 +170,10 @@
   <div class="bg">
     <div class="list scoll" v-if="mode=='file'">
       <div style="padding: 5px 0px;user-select: none;flex:1;display: flex;white-space: nowrap;" :title="store.root">
-        <div class="button" style="margin: 0px 0px 0px 5px;width:15px" @click="openFolderDialog" title="打开文件夹" v-if="mode=='file'">
+        <div class="button" style="margin: 0px 0px 0px 5px;width:15px" @click="openFolderDialog" :title="store.locales=='zh'?'打开文件夹':'Open Folder'" v-if="mode=='file'">
           <i class="fa fa-folder-open"></i> 
         </div>
-        <div class="button" style="margin: 0px 0px 0px 5px;" @click="selectFile" title="打开文件" v-if="mode=='file'">
+        <div class="button" style="margin: 0px 0px 0px 5px;" @click="selectFile" :title="store.locales=='zh'?'打开文件':'Open File'" v-if="mode=='file'">
           <i class="fa fa-file-text"></i> 
         </div>
         <div class="button" style="margin: 0px 0px 0px 5px;" @click="showInput = !showInput" v-if="store.root!=''&&mode=='file'">
@@ -185,9 +185,9 @@
           style="margin: 0px 5px  0px 5px;flex: 1;"
           @keyup.enter="createFile(newFileName); showInput = false; newFileName = ''" 
           @blur="showInput = false; newFileName = ''" 
-          placeholder="创建文件"
+          :placeholder="store.locales=='zh'?'创建文件':'Create File'"
         />
-        <input v-if="store.root!=''" style="margin: 0px 5px  0px 5px;flex: 1;" v-model="filterText" placeholder="搜索"/>
+        <input v-if="store.root!=''" style="margin: 0px 5px  0px 5px;flex: 1;" v-model="filterText" :placeholder="store.locales=='zh'?'搜索':'search'"/>
       </div>
       <el-tree
         ref="treeRef"
@@ -253,7 +253,7 @@
       </div>
     </div>
     <div v-if="contextMenu.visible" :style="contextMenu.style" class="context-menu" @mouseleave="hideContextMenu">
-      <div class="menu-item" @click="deleteFile">删除</div>
+      <div class="menu-item" @click="deleteFile">{{ store.locales=='zh'?'删除':'Delete' }}</div>
     </div>
   </div>
 </template>

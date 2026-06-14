@@ -7,7 +7,7 @@
   import knowledge from './components/knowRAG/knowRAG.vue'
   import flow from './components/workFlow/workFlow.vue'
   import ToDo from './components/todos/ToDo.vue'
-  import Set from './components/Set.vue'
+  import Set from './components/set/Set.vue'
   const set = ref(false); // 是否显示设置面板
   const isMaximized = ref(false); // 窗口是否最大化状态
   store.setTheme()
@@ -18,7 +18,7 @@
       switch(store.mainPanel) {
         case '主页': return 'home';
         case '知识管理': return 'Knowledge Management';
-        case '知识库处理': return 'Knowledge Base Processing';
+        case '知识处理': return 'Knowledge Processing';
         case '工作流': return 'Workflow';
         case '灵感管理': return 'Inspiration Management';
         default: return store.mainPanel;
@@ -61,7 +61,7 @@
       <div class="panel-header">
         <div :class="{active:store.mainPanel=='主页'}" @click="store.mainPanel='主页';" :title="store.locales === 'en' ? 'Home' : '主页'"><i class="fa fa-home"></i></div>
         <div :class="{active:store.mainPanel=='知识管理'}" @click="store.mainPanel='知识管理';"  :title="store.locales === 'en' ? 'Knowledge Management' : '知识管理'"><i class="fa fa-book"></i></div>
-        <div :class="{active:store.mainPanel=='知识库处理'}" @click="store.mainPanel='知识库处理';" :title="store.locales === 'en' ? 'Knowledge Base Processing' : '知识库处理'"><i class="fa fa-stack-overflow"></i></div>
+        <div :class="{active:store.mainPanel=='知识处理'}" @click="store.mainPanel='知识处理';" :title="store.locales === 'en' ? 'Knowledge Processing' : '知识处理'"><i class="fa fa-stack-overflow"></i></div>
         <div :class="{active:store.mainPanel=='工作流'}" @click="store.mainPanel='工作流'"  :title="store.locales === 'en' ? 'Workflow' : '工作流'"><i class="fa fa-stumbleupon"></i></div>
         <div :class="{active:store.mainPanel=='灵感管理'}" @click="store.mainPanel='灵感管理';"  :title="store.locales === 'en' ? 'Inspiration Management' : '灵感管理'"><i class="fa fa-lightbulb-o"></i></div>
         <div style="flex:1;-webkit-app-region: drag;font-size: 12px;">{{ panelTitle }}</div>
@@ -83,7 +83,7 @@
     <div class="main">
       <home v-if="store.mainPanel=='主页'"/>
       <explorer v-if="store.mainPanel=='知识管理'"/>
-      <knowledge v-if="store.mainPanel=='知识库处理'"/>
+      <knowledge v-if="store.mainPanel=='知识处理'"/>
       <flow v-if="store.mainPanel=='工作流'"/>
       <ToDo v-if="store.mainPanel=='灵感管理'"/>
     </div>
@@ -97,14 +97,13 @@
   </div>
 </template>
 
-<style>
+<style scoped>
   .set-overlay {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0, 0, 0, 0.8);
     z-index: 1000;
     display: flex;
     align-items: flex-start;
@@ -113,11 +112,99 @@
 
   .settings-panel {
     position: absolute;
-    width: 80%;
-    left: 10%;
-    top: 60px;
-    height: calc(100% - 120px);
+    width: 100%;
+    top: 39px;
+    height: calc(100% - 40px);
     z-index: 100;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+    
+  /* 左侧主面板 */
+  .mainPanel {
+    width: fit-content;
+    min-width: 100%;
+    height: 39px;
+    background-color: var(--menuColor);
+    border-right: 1px solid var(--borderColor);
+    transition: width 0.1s ease;
+    display: flex;
+    position: relative;
+    z-index: 10;
+    border: var(--borderColor) 1px solid;
+  }
+
+  /* 隐藏状态 */
+  .mainPanel.panel-hide {
+    width: 0;
+    min-width: 0;
+    opacity: 0;
+    border-right: none;
+  }
+
+  /* 拖拽条 */
+  .mainPanel .panel-draggable {
+    position: absolute;
+    right: 0;
+    top: 0;
+    width: 5px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 11;
+  }
+
+  .mainPanel .panel-draggable:hover {
+    background-color: var(--menuActiveColor);
+    opacity: 0.5;
+  }
+
+  /* 面板头部（图标栏） */
+  .panel-header {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    padding: 0;
+    user-select: none;
+    margin-left: 5px;
+  }
+
+  .panel-header div {
+    width: 30px;
+    height: 30px;
+    line-height: 30px;
+    margin: 0px 5px 0px 0px;
+    text-align: center;
+    border-radius: 5px;
+    font-size: 16px;
+    color: var(--fontColor);
+    cursor: pointer;
+    transition: all 0.25s ease;
+  }
+
+  .panel-header div:hover {
+    color: var(--fontActiveColor);
+    background-color: var(--menuActiveColor);
+  }
+
+  .panel-header div.active {
+    color: var(--fontActiveColor);
+    background-color: var(--menuActiveColor);
+  }
+
+  /* 拖拽区域 */
+  .panel-header div[style*="drag"] {
+    cursor: move;
+    opacity: 0.3;
+  }
+
+  .panel-header div[style*="drag"]:hover {
+    background-color: transparent;
+  }
+
+  /* 设置按钮 */
+  .panel-header div:last-child {
+    margin-top: auto;
+    margin-bottom: 5px;
   }
 </style>

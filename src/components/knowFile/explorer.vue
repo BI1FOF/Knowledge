@@ -60,6 +60,9 @@
           <md_mind v-if="store.view.includes('导图')&&store.index!=null" :style="{borderRight:store.UI.layout=='horizontal'?'1px solid var(--borderColor)':'',borderTop:store.UI.layout=='vertical'?'1px solid var(--borderColor)':''}"/>
           <md_ppt v-if="store.view.includes('演示')&&store.index!=null" :style="{borderRight:store.UI.layout=='horizontal'?'1px solid var(--borderColor)':'',borderTop:store.UI.layout=='vertical'?'1px solid var(--borderColor)':''}"/>
           <empty v-if="store.view.length==0||store.root==''" />
+          <div v-if="store.data.length==0&&store.root!=''&&store.view.length>0" style="width: 100%;height:auto;display:flex;align-items:center;justify-content:center;color:var(--fontColor);font-size:16px;">
+            <i class="fa fa-file-text-o"></i> &nbsp;{{store.locales=='zh'?'请选择文件':'Please select files'}}
+          </div>
         </div>
       </div>
     </div>
@@ -181,7 +184,6 @@
     
     if (store.data.length == 0) {
       store.index = null;
-      store.path = '';
     } else {
       if (store.index == index) {
         store.index = Math.max(0, Math.min(index, store.data.length - 1));

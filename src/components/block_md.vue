@@ -152,6 +152,9 @@
         <div class="md" v-html="prep" :style="{padding:isFullscreen?'30px':'2px'}" ref="mdrender">
         </div>
       </div>
+      <div v-if="!ifmd" class="scoll" style="overflow: hidden;overflow-y: auto;z-index: 1;flex:1;">
+        {{ props.content }}
+      </div>
       <div v-if="ifmind" style="z-index: 1;flex:1;border-left: 1px solid var(--borderColor);">
         <svg :id="id" ref="svg"></svg>
       </div>

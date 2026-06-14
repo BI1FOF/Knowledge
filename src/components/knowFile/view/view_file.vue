@@ -273,8 +273,7 @@ onBeforeUnmount(() => {
             <i :class="getIconSizeIcon()"></i>
           </button>
         </li>
-        <!-- 图片宽高比切换按钮（只在网格视图且当前文件夹有图片时显示） -->
-        <li class="menu-tools" v-if="viewMode === 'grid' && files.some((item: any) => isImageFile(item))">
+        <li class="menu-tools" v-if="viewMode === 'grid' && files && files.some((item: any) => isImageFile(item))">
           <button @click="toggleAspectRatio" :title="getAspectRatioTitle()">
             <i :class="getAspectRatioIcon()"></i>
           </button>
@@ -332,7 +331,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 空文件夹提示 -->
-      <div v-if="files.length === 0" class="empty-folder">
+      <div v-if="files && files.length === 0" class="empty-folder">
         <i class="fa fa-folder-open"></i>
         <p>文件夹为空</p>
       </div>
