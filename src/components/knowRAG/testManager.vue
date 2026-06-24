@@ -68,10 +68,22 @@ interface RankAnalysisResult {
   question: string
   answer: string
   algorithm: SearchAlgorithm
-  ranks: string  // 位次，多个用逗号分隔
+  ranks: string
   firstRank: number
   bestRank: number
   foundCount: number
+  answerParts?: string[]
+  hitRate?: number
+  hitCount?: number
+  totalAnswers?: number
+  matchedAnswers?: string[]
+  hitDetails?: Array<{
+    rank: number
+    matchedAnswers: string[]
+    totalAnswers: number
+    hitCount: number
+    hitRate: number
+  }>
   timestamp: string
 }
 
@@ -532,13 +544,55 @@ const generateRankAnalysis = (result: TestResult) => {
   const answerText = result.answer?.trim()
   if (!answerText) return
   
-  // 找出所有包含答案的切片位次
+  // 解析参考答案，支持 | 分割
+  const answerParts = answerText.split('|').map(s => s.trim()).filter(s => s.length > 0)
+  
+  // 找出所有包含答案的切片位次，并记录每个切片匹配了哪些答案
   const answerRanks: number[] = []
+  const hitDetails: Array<{
+    rank: number
+    matchedAnswers: string[]
+    totalAnswers: number
+    hitCount: number
+    hitRate: number
+  }> = []
+  
   for (const slice of result.slices) {
-    if (slice.containsAnswer) {
+    const sliceContent = slice.content.toLowerCase()
+    const matchedAnswers: string[] = []
+    
+    for (const part of answerParts) {
+      if (sliceContent.includes(part.toLowerCase())) {
+        matchedAnswers.push(part)
+      }
+    }
+    
+    if (matchedAnswers.length > 0) {
       answerRanks.push(slice.rank)
+      hitDetails.push({
+        rank: slice.rank,
+        matchedAnswers: matchedAnswers,
+        totalAnswers: answerParts.length,
+        hitCount: matchedAnswers.length,
+        hitRate: matchedAnswers.length / answerParts.length
+      })
     }
   }
+  
+  // 计算总体命中率（所有答案中至少被命中的比例）
+  const matchedAnswerSet = new Set<string>()
+  for (const slice of result.slices) {
+    const sliceContent = slice.content.toLowerCase()
+    for (const part of answerParts) {
+      if (sliceContent.includes(part.toLowerCase())) {
+        matchedAnswerSet.add(part)
+      }
+    }
+  }
+  const overallHitRate = answerParts.length > 0 ? matchedAnswerSet.size / answerParts.length : 0
+  
+  // 获取所有匹配到的答案列表
+  const allMatchedAnswers = Array.from(matchedAnswerSet)
   
   const rankAnalysis: RankAnalysisResult = {
     question: result.question,
@@ -548,6 +602,13 @@ const generateRankAnalysis = (result: TestResult) => {
     firstRank: answerRanks.length > 0 ? Math.min(...answerRanks) : -1,
     bestRank: answerRanks.length > 0 ? Math.min(...answerRanks) : -1,
     foundCount: answerRanks.length,
+    // 新增字段
+    answerParts: answerParts,
+    hitRate: overallHitRate,
+    hitCount: matchedAnswerSet.size,
+    totalAnswers: answerParts.length,
+    matchedAnswers: allMatchedAnswers,
+    hitDetails: hitDetails,
     timestamp: result.timestamp
   }
   
@@ -563,6 +624,7 @@ const generateRankAnalysis = (result: TestResult) => {
   }
 }
 
+
 // 模糊匹配函数
 function fuzzyMatch(text: string, search: string, threshold = 0.7): boolean {
   if (!text || !search) return false
@@ -570,10 +632,24 @@ function fuzzyMatch(text: string, search: string, threshold = 0.7): boolean {
   const textLower = text.toLowerCase()
   const searchLower = search.toLowerCase()
   
+  // 检查是否包含完整答案
   if (textLower.includes(searchLower) || searchLower.includes(textLower)) {
     return true
   }
   
+  // 支持 | 分割的多个答案
+  const answerParts = searchLower.split('|').map(s => s.trim()).filter(s => s.length > 0)
+  
+  if (answerParts.length > 1) {
+    // 只要匹配到任何一个答案就算命中
+    for (const part of answerParts) {
+      if (textLower.includes(part)) {
+        return true
+      }
+    }
+  }
+  
+  // 原有的分词匹配逻辑
   const words = searchLower.split(/\s+/).filter(w => w.length > 1)
   let matchedWords = 0
   
@@ -1009,7 +1085,7 @@ const exportRankAnalysis = async () => {
   try {
     // 准备导出数据
     const exportData: any[][] = [
-      ['问题', '参考答案', '算法', '答案出现位次', '首次出现位次', '最佳位次', '命中数量', '测试时间']
+      ['问题', '参考答案', '算法', '命中率', '命中/总数', '命中的答案', '答案出现位次', '首次出现位次', '最佳位次', '命中数量', '测试时间']
     ]
     
     for (const result of rankAnalysisResults.value) {
@@ -1017,6 +1093,9 @@ const exportRankAnalysis = async () => {
         result.question,
         result.answer,
         result.algorithm,
+        ((result.hitRate || 0) * 100).toFixed(1) + '%',
+        `${result.hitCount || 0}/${result.totalAnswers || 0}`,
+        (result.matchedAnswers || []).join('; '),
         result.ranks,
         result.firstRank === -1 ? '未找到' : result.firstRank,
         result.bestRank === -1 ? '未找到' : result.bestRank,
@@ -1029,21 +1108,23 @@ const exportRankAnalysis = async () => {
     exportData.push([])
     exportData.push(['汇总统计'])
     
-    const algoStats: Record<string, { count: number, avgFirstRank: number, totalFound: number }> = {}
+    const algoStats: Record<string, { count: number, avgFirstRank: number, totalFound: number, avgHitRate: number }> = {}
     for (const result of rankAnalysisResults.value) {
       if (!algoStats[result.algorithm]) {
-        algoStats[result.algorithm] = { count: 0, avgFirstRank: 0, totalFound: 0 }
+        algoStats[result.algorithm] = { count: 0, avgFirstRank: 0, totalFound: 0, avgHitRate: 0 }
       }
       algoStats[result.algorithm].count++
       if (result.firstRank !== -1) {
         algoStats[result.algorithm].avgFirstRank += result.firstRank
       }
       algoStats[result.algorithm].totalFound += result.foundCount
+      algoStats[result.algorithm].avgHitRate += (result.hitRate || 0)
     }
     
     for (const [algo, stats] of Object.entries(algoStats)) {
       const avgFirstRank = stats.count > 0 ? (stats.avgFirstRank / stats.count).toFixed(2) : 'N/A'
-      exportData.push([`算法: ${algo}`, `测试数: ${stats.count}`, `平均首次位次: ${avgFirstRank}`, `总命中数: ${stats.totalFound}`])
+      const avgHitRate = stats.count > 0 ? ((stats.avgHitRate / stats.count) * 100).toFixed(1) + '%' : 'N/A'
+      exportData.push([`算法: ${algo}`, `测试数: ${stats.count}`, `平均首次位次: ${avgFirstRank}`, `总命中数: ${stats.totalFound}`, `平均命中率: ${avgHitRate}`])
     }
     
     // 创建工作簿和工作表
@@ -1054,6 +1135,9 @@ const exportRankAnalysis = async () => {
       { wch: 40 }, // 问题
       { wch: 30 }, // 参考答案
       { wch: 20 }, // 算法
+      { wch: 12 }, // 命中率
+      { wch: 12 }, // 命中/总数
+      { wch: 25 }, // 命中的答案
       { wch: 15 }, // 答案出现位次
       { wch: 12 }, // 首次出现位次
       { wch: 12 }, // 最佳位次
@@ -1423,24 +1507,51 @@ const emit = defineEmits<{
               <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '问题' : 'Question' }}</th>
               <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '参考答案' : 'Answer' }}</th>
               <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '算法' : 'Algorithm' }}</th>
+              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '命中率' : 'Hit Rate' }}</th>
+              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '命中/总数' : 'Hit/Total' }}</th>
+              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '命中的答案' : 'Hit Answers' }}</th>
               <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '答案出现位次' : 'Answer Ranks' }}</th>
-              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '首次出现位次' : 'First Rank' }}</th>
-              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '最佳位次' : 'Best Rank' }}</th>
-              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '命中数量' : 'Hit Count' }}</th>
-              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '测试时间' : 'Timestamp' }}</th>
+              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '首次位次' : 'First Rank' }}</th>
+              <th style="padding:8px;border:1px solid var(--borderColor);text-align:left;">{{ store.locales=='zh' ? '命中数' : 'Hit Count' }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="(result, idx) in rankAnalysisResults" :key="idx"
                 :style="{backgroundColor: idx % 2 === 0 ? 'var(--backgroundColor)' : 'var(--menuColor)'}">
-              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;word-break:break-word;">
+              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;word-break:break-word;max-width:200px;">
                 {{ result.question }}
               </td>
-              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;word-break:break-word;">
-                {{ result.answer }}
+              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;word-break:break-word;max-width:200px;">
+                <div v-for="(part, pIdx) in result.answerParts" :key="pIdx" 
+                    :style="{color: result.matchedAnswers?.includes(part) ? '#4CAF50' : '#f44336'}">
+                  {{ part }}
+                  <span v-if="result.matchedAnswers?.includes(part)" style="font-size:10px;color:#4CAF50;">
+                    <i class="fa fa-check"></i>
+                  </span>
+                  <span v-else style="font-size:10px;color:#f44336;">
+                    <i class="fa fa-times"></i>
+                  </span>
+                </div>
               </td>
               <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;">
                 {{ getAlgorithmLabel(result.algorithm) }}
+              </td>
+              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;">
+                <span :style="{color: (result.hitRate || 0) > 0.7 ? '#4CAF50' : (result.hitRate || 0) > 0.3 ? '#FF9800' : '#f44336', fontWeight: 'bold'}">
+                  {{ ((result.hitRate || 0) * 100).toFixed(1) }}%
+                </span>
+              </td>
+              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;">
+                {{ result.hitCount || 0 }} / {{ result.totalAnswers || 0 }}
+              </td>
+              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;max-width:150px;">
+                <span v-if="result.matchedAnswers && result.matchedAnswers.length > 0" 
+                      style="font-size:11px;word-break:break-word;">
+                  {{ result.matchedAnswers.join(', ') }}
+                </span>
+                <span v-else style="color:#f44336;font-size:11px;">
+                  {{ store.locales=='zh' ? '无命中' : 'No hit' }}
+                </span>
               </td>
               <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;">
                 <span :style="{color: result.ranks === '未找到' ? '#f44336' : '#4CAF50', fontWeight: result.ranks !== '未找到' ? 'bold' : 'normal'}">
@@ -1453,21 +1564,13 @@ const emit = defineEmits<{
                 </span>
               </td>
               <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;">
-                <span :style="{color: result.bestRank === -1 ? '#f44336' : '#4CAF50'}">
-                  {{ result.bestRank === -1 ? (store.locales=='zh' ? '未找到' : 'Not Found') : result.bestRank }}
-                </span>
-              </td>
-              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;">
                 <span :style="{color: result.foundCount > 0 ? '#4CAF50' : '#f44336'}">
                   {{ result.foundCount }}
                 </span>
               </td>
-              <td style="padding:8px;border:1px solid var(--borderColor);vertical-align:top;font-size:11px;">
-                {{ new Date(result.timestamp).toLocaleString() }}
-              </td>
             </tr>
             <tr v-if="rankAnalysisResults.length === 0">
-              <td colspan="8" style="padding:40px;text-align:center;color:var(--borderColor);">
+              <td colspan="9" style="padding:40px;text-align:center;color:var(--borderColor);">
                 <i class="fa fa-info-circle"></i> 
                 {{ store.locales=='zh' ? '暂无位次分析数据，请先运行测试' : 'No rank analysis data, please run tests first' }}
               </td>

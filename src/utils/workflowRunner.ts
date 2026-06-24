@@ -1332,6 +1332,11 @@ export class WorkflowRunner {
             this.store.AIconfig.llm.ollama.model = node.model
           }
           break
+        case 'lmstudio':
+          if (node.model && this.store.AIconfig?.llm?.lmstudio) {
+            this.store.AIconfig.llm.lmstudio.model = node.model
+          }
+          break
         case 'openai':
         case 'deepseek':
           if (this.store.AIconfig?.llm?.openai) {
@@ -1496,6 +1501,11 @@ export class WorkflowRunner {
             case 'ollama':
               if (node.model && this.store.AIconfig?.llm?.ollama) {
                 this.store.AIconfig.llm.ollama.model = node.model
+              }
+              break
+            case 'lmstudio':  // 新增 LM Studio 支持
+              if (node.model && this.store.AIconfig?.llm?.lmstudio) {
+                this.store.AIconfig.llm.lmstudio.model = node.model
               }
               break
             case 'openai':
@@ -2498,7 +2508,14 @@ export class WorkflowRunner {
     switch (node.model_type) {
       case 'ollama':
         break
-        
+      
+      case 'lmstudio':
+        const lmstudioBaseUrl = this.store.AIconfig?.llm?.lmstudio?.base_url
+        if (!lmstudioBaseUrl) {
+          return { valid: false, message: this.t('lmstudio_url_required') }
+        }
+        break
+
       case 'openai':
       case 'deepseek':
         if (!this.store.AIconfig?.llm?.openai?.api_key) {

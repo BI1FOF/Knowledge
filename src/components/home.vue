@@ -34,22 +34,21 @@
               {{ chat.title || `聊天 ${index + 1}` }}
             </span>
             <div class="chat-item-right">
+              <!-- 删除按钮 -->
+              <div class="chat-actions" @click.stop="deleteChat(index)" title="删除聊天">
+                <i class="fa fa-trash"></i>
+              </div>
               <!-- 当前聊天的生成指示器 -->
               <div v-if="chat.isGenerating || shouldShowBackgroundExecution(chat, index)" 
                class="execution-indicator" 
                :title="chat.isGenerating ? '正在生成中...' : '后台执行中...'">
                 <i class="fa fa-spinner fa-spin"></i>
               </div>
-              
-              <!-- 删除按钮 -->
-              <div class="chat-actions" @click.stop="deleteChat(index)" title="删除聊天">
-                <i class="fa fa-trash"></i>
-              </div>
             </div>
           </div>
           <div class="chat-info">
             <span class="model-name">{{ getModelDisplayName(chat.config) }}</span>
-            <span class="message-count">{{ chat.messages.length }} {{store.locales==""?"条消息":"messages"}}</span>
+            <span class="message-count">{{ chat.messages.length }} {{store.locales=="zh"?"条消息":"messages"}}</span>
           </div>
         </div>
         <div class="chat-item" @click="createNewChat" title="新建聊天">
@@ -901,6 +900,8 @@ const availableModels = computed(() => {
       return config.llama.availableModels.map(m => m.name) || []
     case 'ollama':
       return config.ollama.available_models || []
+    case 'lmstudio':
+      return config.lmstudio?.available_models || []
     case 'openai':
     case 'deepseek':
       return config.openai.available_models || []
@@ -2098,6 +2099,8 @@ function getDefaultModel(llmType: string): string {
       return ''
     case 'ollama':
       return store.AIconfig.llm.ollama.model || ''
+    case 'lmstudio':
+      return store.AIconfig.llm.lmstudio?.model || ''
     case 'openai':
     case 'deepseek':
       return store.AIconfig.llm.openai.model || 'deepseek-chat'
@@ -2279,6 +2282,11 @@ const updateStoreModelConfig = (config: ChatConfig) => {
     case 'ollama':
       llmConfig.ollama.model = config.model
       break
+    case 'lmstudio':
+      if (llmConfig.lmstudio) {
+        llmConfig.lmstudio.model = config.model
+      }
+      break
     case 'openai':
     case 'deepseek':
       llmConfig.openai.model = config.model
@@ -2312,6 +2320,11 @@ const restoreStoreModelConfig = (type: string, model: string) => {
     case 'ollama':
       llmConfig.ollama.model = model
       break
+    case 'lmstudio':
+      if (llmConfig.lmstudio) {
+        llmConfig.lmstudio.model = model
+      }
+      break
     case 'openai':
     case 'deepseek':
       llmConfig.openai.model = model
@@ -2339,6 +2352,8 @@ const getCurrentModelFromStore = (): string => {
       return llmConfig.llama.modelName || ''
     case 'ollama':
       return llmConfig.ollama.model || ''
+    case 'lmstudio':
+      return llmConfig.lmstudio?.model || ''
     case 'openai':
     case 'deepseek':
       return llmConfig.openai.model || ''

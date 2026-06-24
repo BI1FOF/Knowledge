@@ -34,6 +34,14 @@ interface LlamaConfig {
     topK: number;
 }
 
+// LM Studio 配置类型
+interface LMStudioConfig {
+    base_url: string;
+    model: string;
+    available_models: string[];
+    api_key?: string; // LM Studio 默认不需要 API key，但保留以兼容
+}
+
 interface LLMConfig {
     stream: boolean;
     temperature: number;
@@ -114,6 +122,154 @@ export class AIUtils {
         } catch (error) {
             console.error('检查llama连接失败:', error);
             return { online: false, availableModels: [] };
+        }
+    }
+
+    static async checkLMStudioConnection(lmstudioConfig: {
+        base_url: string;
+        model?: string;
+    }): Promise<{
+        online: boolean;
+        available_models: string[];
+        model?: string;
+    }> {
+        if (!lmstudioConfig.base_url) {
+            return { online: false, available_models: [], model: '' };
+        }
+
+        try {
+            // LM Studio 使用 OpenAI 兼容的 /v1/models 端点
+            const response = await fetch(`${lmstudioConfig.base_url}/v1/models`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const available_models = data.data.map((model: any) => model.id);
+                
+                // 检查当前选择的模型是否在可用列表中
+                let model = lmstudioConfig.model;
+                if (model && !available_models.includes(model)) {
+                    model = available_models.length > 0 ? available_models[0] : '';
+                }
+                if (!model && available_models.length > 0) {
+                    model = available_models[0];
+                }
+
+                return { online: true, available_models, model };
+            } else {
+                console.error('LM Studio API连接失败:', response.statusText);
+                return { online: false, available_models: [], model: lmstudioConfig.model };
+            }
+        } catch (error) {
+            console.error('LM Studio连接错误:', error);
+            return { online: false, available_models: [], model: lmstudioConfig.model };
+        }
+    }
+
+    static async sendToLMStudio(
+        lmstudioConfig: LMStudioConfig,
+        llmConfig: LLMConfig,
+        messages: Message[],
+        options?: {
+            onStream?: (chunk: string) => void;
+            onComplete?: (content: string) => void;
+            onError?: (error: Error) => void;
+            signal?: AbortSignal;
+        }
+    ): Promise<string> {
+        if (!lmstudioConfig.model) {
+            const error = new Error('请先在AI配置中选择一个LM Studio模型');
+            options?.onError?.(error);
+            throw error;
+        }
+
+        if (!lmstudioConfig.base_url) {
+            const error = new Error('请先配置LM Studio服务地址');
+            options?.onError?.(error);
+            throw error;
+        }
+
+        try {
+            // 构建符合 OpenAI 格式的请求体
+            const requestBody = {
+                model: lmstudioConfig.model,
+                messages: messages.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                })),
+                stream: llmConfig.stream && !!options?.onStream,
+                temperature: llmConfig.temperature || 0.7,
+                max_tokens: llmConfig.max_tokens || 2048,
+                top_p: llmConfig.top_p || 1,
+            };
+
+            const endpoint = `${lmstudioConfig.base_url}/v1/chat/completions`;
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json'
+            };
+
+            // 如果有 API key（LM Studio 默认不需要，但保留兼容）
+            if (lmstudioConfig.api_key) {
+                headers['Authorization'] = `Bearer ${lmstudioConfig.api_key}`;
+            }
+
+            // 使用通用的流式/非流式请求处理
+            if (llmConfig.stream && options?.onStream) {
+                return await AIUtils.makeStreamingRequest(endpoint, requestBody, headers, {
+                    ...options,
+                    // 添加 OpenAI 特定的响应解析
+                    parseResponse: (parsed: any) => {
+                        let content = '';
+                        if (parsed.choices && parsed.choices[0]) {
+                            const delta = parsed.choices[0].delta;
+                            if (delta && delta.content) {
+                                content = delta.content;
+                            }
+                        }
+                        return content;
+                    }
+                });
+            } else {
+                // 非流式请求
+                const controller = new AbortController();
+                if (options?.signal) {
+                    options.signal.addEventListener('abort', () => controller.abort());
+                }
+
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    throw new Error(`LM Studio API错误: ${response.status} ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                let content = '';
+
+                // 解析 OpenAI 兼容的响应格式
+                if (data.choices && data.choices[0]) {
+                    if (data.choices[0].message && data.choices[0].message.content) {
+                        content = data.choices[0].message.content;
+                    } else if (data.choices[0].text) {
+                        content = data.choices[0].text;
+                    }
+                }
+
+                options?.onComplete?.(content);
+                return content;
+            }
+        } catch (error) {
+            console.error('[AIUtils] LM Studio请求失败:', error);
+            options?.onError?.(error as Error);
+            throw error;
         }
     }
 
@@ -373,15 +529,18 @@ export class AIUtils {
 
     // 检查OpenAI兼容API连接
     static async checkOpenAIConnection(openaiConfig: any) {
-        if (!openaiConfig.api_key) {
-            return { online: false, available_models: [] };
+        if (!openaiConfig.api_key && !openaiConfig.base_url?.includes('localhost')) {
+            // 对于 LM Studio 等本地服务，允许没有 API key
+            if (!openaiConfig.base_url) {
+                return { online: false, available_models: [] };
+            }
         }
         
         try {
             const response = await fetch(`${openaiConfig.base_url}/v1/models`, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${openaiConfig.api_key}`,
+                    'Authorization': `Bearer ${openaiConfig.api_key || 'not-needed'}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -986,6 +1145,24 @@ export class AIUtils {
             let fullContent = '';
             let buffer = '';
             
+            // 获取自定义解析函数
+            const parseResponse = options?.parseResponse || ((parsed: any) => {
+                let content = '';
+                if (parsed.choices && parsed.choices[0]) {
+                    const delta = parsed.choices[0].delta;
+                    if (delta && delta.content) {
+                        content = delta.content;
+                    }
+                } else if (parsed.message && parsed.message.content) {
+                    content = parsed.message.content;
+                } else if (parsed.delta && parsed.delta.text) {
+                    content = parsed.delta.text;
+                } else if (parsed.candidates && parsed.candidates[0]?.content?.parts[0]?.text) {
+                    content = parsed.candidates[0].content.parts[0].text;
+                }
+                return content;
+            });
+            
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -1001,41 +1178,33 @@ export class AIUtils {
                     const trimmedLine = line.trim();
                     if (!trimmedLine) continue;
                     
+                    // 处理 data: 前缀
                     if (trimmedLine.startsWith('data: ')) {
                         const data = trimmedLine.substring(6);
                         if (data === '[DONE]') continue;
                         
                         try {
                             const parsed = JSON.parse(data);
-                            let content = '';
-                            
-                            // OpenAI 格式
-                            if (parsed.choices && parsed.choices[0]) {
-                                const delta = parsed.choices[0].delta;
-                                if (delta && delta.content) {
-                                    content = delta.content;
-                                }
-                            }
-                            // Ollama 格式
-                            else if (parsed.message && parsed.message.content) {
-                                content = parsed.message.content;
-                            }
-                            // Anthropic 格式
-                            else if (parsed.delta && parsed.delta.text) {
-                                content = parsed.delta.text;
-                            }
-                            // Google 格式
-                            else if (parsed.candidates && parsed.candidates[0]?.content?.parts[0]?.text) {
-                                content = parsed.candidates[0].content.parts[0].text;
-                            }
-                            
+                            const content = parseResponse(parsed);
                             if (content) {
                                 fullContent += content;
                                 options?.onStream?.(content);
                             }
                         } catch (e) {
-                            // 忽略 JSON 解析错误，但记录以便调试
-                            console.debug('解析流式数据失败:', e, '原始数据:', data);
+                            // 忽略 JSON 解析错误
+                            console.debug('解析流式数据失败:', e);
+                        }
+                    } else {
+                        // 尝试直接解析 JSON（某些 API 不遵循 SSE 格式）
+                        try {
+                            const parsed = JSON.parse(trimmedLine);
+                            const content = parseResponse(parsed);
+                            if (content) {
+                                fullContent += content;
+                                options?.onStream?.(content);
+                            }
+                        } catch (e) {
+                            // 忽略
                         }
                     }
                 }

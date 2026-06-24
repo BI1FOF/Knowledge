@@ -73,11 +73,19 @@ const t = (zh: string, en: string): string => {
 
 // 区分嵌入模型与对话/处理模型
 const embedModelList = computed(() => {
-  return (props.model.list || []).filter((m: any) => (m.name || '').toLowerCase().includes('embed'))
+  const embedPattern = /^(bge|text-embedding|ada-embedding|instructor|e5|gte|m3e)|embed|embedding/i
+  return (props.model.list || []).filter((m: any) => {
+    const name = (m.name || '')
+    return embedPattern.test(name)
+  })
 })
 
 const nonEmbedModelList = computed(() => {
-  return (props.model.list || []).filter((m: any) => !(m.name || '').toLowerCase().includes('embed'))
+  const embedPattern = /^(bge|text-embedding|ada-embedding|instructor|e5|gte|m3e)|embed|embedding/i
+  return (props.model.list || []).filter((m: any) => {
+    const name = (m.name || '')
+    return !embedPattern.test(name)
+  })
 })
 
 // 配置分组

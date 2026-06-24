@@ -2768,6 +2768,8 @@ const getAvailableModels = computed(() => {
   switch (node.model_type) {
     case 'ollama':
       return store.AIconfig?.llm?.ollama?.available_models || []
+    case 'lmstudio':
+      return store.AIconfig?.llm?.lmstudio?.available_models || []
     case 'openai':
     case 'deepseek':
       return store.AIconfig?.llm?.openai?.available_models || []
@@ -6277,6 +6279,8 @@ const getModelListForType = (modelType: string | undefined): string[] => {
   switch (modelType) {
     case 'ollama':
       return store.AIconfig?.llm?.ollama?.available_models || []
+    case 'lmstudio':
+      return store.AIconfig?.llm?.lmstudio?.available_models || []
     case 'openai':
     case 'deepseek':
       return store.AIconfig?.llm?.openai?.available_models || []

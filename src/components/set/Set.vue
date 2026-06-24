@@ -114,6 +114,10 @@ const getCurrentConfigHelp = computed(() => {
       return store.locales === 'zh' 
         ? 'Ollama是本地运行的AI模型服务。请确保Ollama服务已启动。'
         : 'Ollama is a local AI model service. Make sure Ollama service is running.'
+    case 'lmstudio':  // 新增
+      return store.locales === 'zh'
+        ? 'LM Studio是本地运行的AI模型服务，兼容OpenAI API格式。请确保LM Studio服务已启动并加载了模型。'
+        : 'LM Studio is a local AI model service compatible with OpenAI API format. Make sure LM Studio is running with a model loaded.'
     case 'openai':
       return store.locales === 'zh'
         ? 'OpenAI官方API配置。需要有效的API密钥。'
@@ -425,7 +429,18 @@ const getModelName = (modelPath: string) => {
     
     return basename(modelPath)
 }
+const handleLMStudioUrlChange = async () => {
+    await refreshLMStudioModels()
+}
 
+const handleLMStudioModelChange = () => {
+    store.saveConfig()
+}
+
+const refreshLMStudioModels = async () => {
+    await store.getAIconfig()
+    store.saveConfig()
+}
 // 组件挂载时初始化
 onMounted(async () => {
     // 检查Python安装状态
@@ -435,24 +450,28 @@ onMounted(async () => {
     await fetchPythonPackages()
     
     if (store.AIconfig.llm.type === 'ollama') {
-        // 先尝试从 localStorage 直接读取保存的模型
-        try {
-            const savedConfig = localStorage.getItem('AIconfig')
-            if (savedConfig) {
-                const parsed = JSON.parse(savedConfig)
-                if (parsed.llm?.type === 'ollama' && parsed.llm.ollama?.model) {
-                    const savedModel = parsed.llm.ollama.model
-                    // 直接设置到 store
-                    store.AIconfig.llm.ollama.model = savedModel
-                }
-            }
-        } catch (e) {
-            console.error('恢复模型失败:', e)
+      // 先尝试从 localStorage 直接读取保存的模型
+      try {
+        const savedConfig = localStorage.getItem('AIconfig')
+        if (savedConfig) {
+          const parsed = JSON.parse(savedConfig)
+          if (parsed.llm?.type === 'ollama' && parsed.llm.ollama?.model) {
+              const savedModel = parsed.llm.ollama.model
+              // 直接设置到 store
+              store.AIconfig.llm.ollama.model = savedModel
+          }
         }
+      } catch (e) {
+        console.error('恢复模型失败:', e)
+      }
         
-        // 延迟刷新模型列表，但不覆盖已选择的模型
+      // 延迟刷新模型列表，但不覆盖已选择的模型
+      setTimeout(async () => {
+        await refreshOllamaModels()
+      }, 100)
+    }else if (store.AIconfig.llm.type === 'lmstudio') {
         setTimeout(async () => {
-            await refreshOllamaModels()
+            await refreshLMStudioModels()
         }, 100)
     }
 
@@ -648,7 +667,7 @@ onBeforeUnmount(() => {
             <label>{{ store.locales=='zh'?'AI类型' : 'AI Type' }}</label>
             <select v-model="store.AIconfig.llm.type">
               <option v-for="(option, index) in store.AIconfig.llm.types" :key="index" :value="option">
-                {{ option.charAt(0).toUpperCase() + option.slice(1) }}
+                  {{ option === 'lmstudio' ? 'LM Studio' : option.charAt(0).toUpperCase() + option.slice(1) }}
               </option>
             </select>
             <div class="config-description">
@@ -757,7 +776,43 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
-          
+          <!-- LM Studio 配置 -->
+          <div v-if="store.AIconfig.llm.type === 'lmstudio'">
+              <div class="form-group">
+                  <label>{{ store.locales=='zh'?'服务地址' : 'Service URL' }}</label>
+                  <input v-model="store.AIconfig.llm.lmstudio.base_url" 
+                        :placeholder="store.locales=='zh'?'例如: http://localhost:1234' : 'Example: http://localhost:1234'"
+                        @change="handleLMStudioUrlChange"/>
+                  <div class="config-description">
+                      {{ store.locales=='zh'?'LM Studio 默认地址为 http://localhost:1234' : 'LM Studio default URL is http://localhost:1234' }}
+                  </div>
+              </div>
+              
+              <div class="form-group">
+                  <label>{{ store.locales=='zh'?'模型名称' : 'Model Name' }}</label>
+                  <div class="input-with-button">
+                      <select v-model="store.AIconfig.llm.lmstudio.model" @change="handleLMStudioModelChange">
+                          <option value="">{{ store.locales=='zh'?'请选择模型' : 'Select model' }}</option>
+                          <option v-for="model in store.AIconfig.llm.lmstudio.available_models" 
+                                  :key="model" 
+                                  :value="model">
+                              {{ model }}
+                          </option>
+                      </select>
+                      <div class="button" style="width:15px;height:18px;margin-top:4px" @click="refreshLMStudioModels" 
+                          :title="store.locales=='zh'?'刷新模型列表' : 'Refresh model list'">
+                          <i class="fa fa-refresh"></i>
+                      </div>
+                  </div>
+              </div>
+              
+              <!-- API Key（可选） -->
+              <div class="form-group">
+                  <label>{{ store.locales=='zh'?'API密钥(可选)' : 'API Key (Optional)' }}</label>
+                  <input type="password" v-model="store.AIconfig.llm.lmstudio.api_key" 
+                        :placeholder="store.locales=='zh'?'LM Studio 默认不需要 API 密钥' : 'LM Studio does not require API key by default'"/>
+              </div>
+          </div>
           <!-- OpenAI/DeepSeek配置 -->
           <div v-if="store.AIconfig.llm.type === 'openai' || store.AIconfig.llm.type === 'deepseek'">
             <div class="form-group">
