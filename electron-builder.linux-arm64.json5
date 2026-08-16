@@ -15,10 +15,12 @@
   ],
   "linux": {
     "target": [
-      "deb"
-    ],
-    "arch": [
-      "arm64"
+      {
+        "target": "deb",
+        "arch": [
+          "arm64"
+        ]
+      }
     ],
     "artifactName": "${productName}-Linux-${version}-${arch}.${ext}"
   }
