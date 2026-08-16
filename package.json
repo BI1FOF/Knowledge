@@ -22,6 +22,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build && electron-builder",
     "build-linux": "vue-tsc --noEmit && vite build && electron-builder --linux",
+    "build-linux-arm64": "vue-tsc --noEmit && vite build && electron-builder --linux --arm64 --config electron-builder.linux-arm64.json5",
     "preview": "vite preview"
   },
   "build": {

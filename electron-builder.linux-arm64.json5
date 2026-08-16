@@ -1,0 +1,25 @@
+/**
+ * @see https://www.electron.build/configuration/configuration
+ */
+{
+  "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
+  "appId": "AIKM",
+  "asar": true,
+  "productName": "AI-KM",
+  "directories": {
+    "output": "release/${version}"
+  },
+  "files": [
+    "dist",
+    "dist-electron"
+  ],
+  "linux": {
+    "target": [
+      "deb"
+    ],
+    "arch": [
+      "arm64"
+    ],
+    "artifactName": "${productName}-Linux-${version}-${arch}.${ext}"
+  }
+}

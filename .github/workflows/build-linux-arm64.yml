@@ -1,0 +1,54 @@
+name: Build Linux ARM64 deb
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+      - "electron-builder.json5"
+      - "electron-builder.linux-arm64.json5"
+      - "vite.config.ts"
+      - "tsconfig.json"
+      - "tsconfig.node.json"
+      - "electron/**"
+      - "src/**"
+      - "public/**"
+      - "index.html"
+      - "globals.d.ts"
+      - ".github/workflows/build-linux-arm64.yml"
+
+jobs:
+  build-linux-arm64:
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install system fpm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ruby-full build-essential
+          sudo gem install fpm --no-document
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Build Linux ARM64 deb
+        run: npm run build-linux-arm64
+        env:
+          USE_SYSTEM_FPM: "true"
+
+      - name: Upload deb Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-KM-linux-arm64-deb
+          path: release/**/*.deb
+          if-no-files-found: error
+          retention-days: 14
