@@ -14,6 +14,7 @@
     "dist-electron"
   ],
   "linux": {
+    "maintainer": "BI1FOF <bi1fof@163.com>",
     "target": [
       {
         "target": "deb",
