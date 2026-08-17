@@ -13,6 +13,7 @@ export default defineConfig(({ command }) => {
   const sourcemap = isServe || !!process.env.VSCODE_DEBUG
 
   return {
+    base: './',
     build: {
       chunkSizeWarningLimit: 1500, // 将警告阈值提高到 1500KB（默认是 500KB）
     },
