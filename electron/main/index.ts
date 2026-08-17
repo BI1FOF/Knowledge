@@ -27,6 +27,10 @@ process.env.VITE_PUBLIC = process.env.VITE_DEV_SERVER_URL
 // Disable GPU Acceleration for Windows 7
 if (release().startsWith('6.1')) app.disableHardwareAcceleration()
 
+// ARM Linux environments often lack working GPU drivers, which can crash the
+// renderer GPU process and leave a blank window.
+if (process.platform === 'linux') app.disableHardwareAcceleration()
+
 // Set application name for Windows 10+ notifications
 if (process.platform === 'win32') app.setAppUserModelId(app.getName())
 
