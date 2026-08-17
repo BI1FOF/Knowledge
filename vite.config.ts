@@ -14,6 +14,9 @@ export default defineConfig(({ command }) => {
 
   return {
     base: './',
+    define: {
+      PACKAGE_VERSION: JSON.stringify('3.2.1'),
+    },
     build: {
       chunkSizeWarningLimit: 1500, // 将警告阈值提高到 1500KB（默认是 500KB）
     },
