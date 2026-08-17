@@ -11,7 +11,7 @@ import xlsx from 'xlsx'
 import * as PDFJS from 'pdfjs-dist'
 import { pythonService } from './python-service'
 import { trustedPythonService } from './trusted-python-service'
-import { fork } from 'child_process'
+import { fork, exec } from 'child_process'
 import { randomUUID } from 'crypto'
 
 globalThis.__filename = fileURLToPath(import.meta.url)
@@ -1397,7 +1397,6 @@ ipcMain.handle('executeSkillScript', async (event, skillPath, scriptName, args =
         return { success: false, error: error.message }
       }
     } else if (ext === '.sh' || ext === '.bat') {
-      const { exec } = require('child_process')
       return new Promise((resolve) => {
         exec(`"${scriptPath}" ${args.join(' ')}`, (error: any, stdout: any, stderr: any) => {
           if (error) {
